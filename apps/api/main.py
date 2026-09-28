@@ -6,9 +6,12 @@ services out; no SQL, no investigation logic, no Neo4j access in routes.
 """
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from infrastructure.database.session import get_engine
 from infrastructure.neo4j import client as graph_client
 from sqlalchemy import text
@@ -288,3 +291,17 @@ async def list_cases(
 async def get_case(case_id: str) -> InvestigationDetailOut:
     """Alias of GET /investigations/{id} (case id == investigation id)."""
     return await get_investigation(case_id)
+
+
+# --------------------------------------------------------------------------- #
+# Frontend dashboard (Phase 16) - static SPA consuming only the Case API
+# --------------------------------------------------------------------------- #
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+
+@app.get("/")
+async def index() -> RedirectResponse:
+    """Serve the investigation dashboard."""
+    return RedirectResponse(url="/static/index.html")
