@@ -11,7 +11,6 @@ import asyncio
 import sys
 
 import httpx
-
 from apps.api.main import app
 
 SCENARIOS = ("TXN-001", "TXN-1006", "TXN-1001")

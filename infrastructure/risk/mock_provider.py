@@ -107,14 +107,20 @@ class MockRiskProvider:
 
 
 def get_provider() -> RiskProvider:
-    """Return the configured provider (mock for Phase 7; extension point).
+    """Return the configured provider (``RISK_PROVIDER=mock|ml``).
 
-    The ``RISK_PROVIDER`` setting currently accepts only ``mock``. When the
-    ML engine exists, this factory will map ``ml`` to MLModelRiskProvider.
+    ``mock`` (default) keeps every test and demo deterministic. ``ml`` loads
+    the trained LightGBM artifact (Phase 14) through the same contract - the
+    Risk MCP, agent, API, and evidence pipeline cannot tell the difference
+    apart from the explicit source/model_version provenance.
     """
     from infrastructure.config import get_settings
 
     provider_name = (get_settings().risk_provider or "mock").lower()
+    if provider_name == "ml":
+        from infrastructure.risk.ml_provider import MLRiskProvider
+
+        return MLRiskProvider()
     if provider_name != "mock":
-        raise ValueError(f"Unknown RISK_PROVIDER '{provider_name}'; only 'mock' exists in Phase 7.")
+        raise ValueError(f"Unknown RISK_PROVIDER '{provider_name}'; expected 'mock' or 'ml'.")
     return MockRiskProvider()
