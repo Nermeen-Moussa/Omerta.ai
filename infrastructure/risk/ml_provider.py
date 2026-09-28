@@ -127,7 +127,12 @@ class MLRiskProvider:
                 f"ML risk model artifact not found at {path}; run "
                 "`uv run python scripts/train_risk_model.py` first."
             )
-        self._booster = lgb.Booster(model_file=str(path))
+        # Load via model_str (text read), NOT model_file: the artifact is a
+        # line-oriented text format whose parser aborts on CRLF line endings,
+        # which git autocrlf can introduce on Windows checkouts. Reading the
+        # bytes in Python text mode normalizes newlines and is robust on
+        # every platform regardless of git configuration.
+        self._booster = lgb.Booster(model_str=path.read_text(encoding="utf-8"))
         self._importance = dict(
             zip(
                 FEATURE_NAMES,
