@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: omerta-postgres
+    environment:
+      POSTGRES_USER: omerta
+      POSTGRES_PASSWORD: omerta_dev_password
+      POSTGRES_DB: omerta
+    ports:
+      # Host port 15432: dev machines often run a native PostgreSQL on 5432
+      # (and occasionally other services on nearby ports).
+      - "15432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omerta -d omerta"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5-community
+    container_name: omerta-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/omerta_dev_password
+    ports:
+      # Host ports 17474/17687: after a Windows reboot the Hyper-V winnat
+      # service can reserve shifting TCP ranges (observed 7681-7780) that
+      # cover 7687, preventing container startup. Fixed high ports avoid it.
+      - "17474:7474"
+      - "17687:7687"
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  neo4j_data:
