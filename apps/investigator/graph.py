@@ -1,10 +1,13 @@
 """LangGraph investigation workflow (Phase 8, deterministic).
 
 START -> initialize_investigation -> load_transaction -> load_account_context
-       -> load_graph_context -> load_risk_context -> assemble_evidence -> END
+       -> load_graph_context -> load_risk_context -> load_knowledge_context
+       -> assemble_evidence -> END
 
 The workflow stops early only when the investigation has failed (e.g. the
-transaction does not exist). No LLM, no ML, no RAG - orchestration only.
+transaction does not exist). Orchestration is deterministic; the agent node
+(Phase 9) reasons over the snapshot and the knowledge node (Phase 12)
+retrieves stored policy/typology context via the Knowledge MCP service.
 """
 
 import asyncio
@@ -34,6 +37,7 @@ def build_investigation_graph() -> Any:
     graph.add_node("load_account_context", nodes.load_account_context)
     graph.add_node("load_graph_context", nodes.load_graph_context)
     graph.add_node("load_risk_context", nodes.load_risk_context)
+    graph.add_node("load_knowledge_context", nodes.load_knowledge_context)
     graph.add_node("analyze_with_agent", nodes.analyze_with_agent)
     graph.add_node("assemble_evidence", nodes.assemble_evidence)
 
@@ -49,7 +53,8 @@ def build_investigation_graph() -> Any:
     )
     graph.add_edge("load_account_context", "load_graph_context")
     graph.add_edge("load_graph_context", "load_risk_context")
-    graph.add_edge("load_risk_context", "analyze_with_agent")
+    graph.add_edge("load_risk_context", "load_knowledge_context")
+    graph.add_edge("load_knowledge_context", "analyze_with_agent")
     graph.add_edge("analyze_with_agent", "assemble_evidence")
     graph.add_edge("assemble_evidence", END)
     return graph.compile()

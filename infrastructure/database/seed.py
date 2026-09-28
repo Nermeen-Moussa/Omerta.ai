@@ -28,6 +28,8 @@ from infrastructure.database.models import (
     Evidence,
     InvestigationCase,
     IPAddress,
+    KnowledgeChunk,
+    KnowledgeDocument,
     Transaction,
 )
 from infrastructure.database.session import create_engine, session_scope
@@ -516,9 +518,28 @@ async def _upsert_evidence(
 # --------------------------------------------------------------------------- #
 
 
+async def _ingest_knowledge(session: AsyncSession) -> dict[str, int]:
+    """Ingest the curated knowledge corpus (Phase 12) into the same session.
+
+    Deterministic and idempotent: documents upsert on document_id, chunks on
+    chunk_id; re-running never duplicates and removes stale chunks.
+    """
+    from domain.services.knowledge_service import KnowledgeService
+
+    result = await KnowledgeService(session).ingest_corpus()
+    return {
+        "documents_inserted": result.documents_inserted,
+        "documents_updated": result.documents_updated,
+        "chunks_inserted": result.chunks_inserted,
+        "index_terms": result.index_terms,
+    }
+
+
 async def reset_all(engine: AsyncEngine) -> None:
     """Delete all rows (keep schema from migrations). Order respects FKs."""
     async with engine.begin() as conn:
+        await conn.execute(delete(KnowledgeChunk))
+        await conn.execute(delete(KnowledgeDocument))
         await conn.execute(delete(Evidence))
         await conn.execute(delete(InvestigationCase))
         await conn.execute(delete(Alert))
@@ -550,6 +571,7 @@ async def seed(engine: AsyncEngine) -> dict[str, int]:
         }
         for row in EVIDENCE:
             await _upsert_evidence(session, row, case_ids=case_ids)
+        knowledge_counts = await _ingest_knowledge(session)
 
         counts: dict[str, int] = {}
         for model in (
@@ -560,8 +582,11 @@ async def seed(engine: AsyncEngine) -> dict[str, int]:
             Alert,
             InvestigationCase,
             Evidence,
+            KnowledgeDocument,
+            KnowledgeChunk,
         ):
             counts[model.__tablename__] = len((await session.scalars(select(model))).all())
+        counts["knowledge_index_terms"] = knowledge_counts["index_terms"]
     return counts
 
 

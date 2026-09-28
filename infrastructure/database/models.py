@@ -274,3 +274,48 @@ class AuditEvent(Base):
         UniqueConstraint("case_id", "event_id", name="uq_audit_case_event_id"),
         Index("ix_audit_events_case_seq", "case_id", "id"),
     )
+
+
+class KnowledgeDocument(TimestampMixin, Base):
+    """Stored knowledge document (Phase 12 RAG): policy/regulation/typology.
+
+    Content is curated data, never LLM-generated. ``version`` +
+    ``effective_date`` let retrieval reason about document currency.
+    """
+
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    # POLICY | REGULATION | TYPOLOGY | PROCEDURE
+    document_type: Mapped[str] = mapped_column(String(32), index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    jurisdiction: Mapped[str] = mapped_column(String(16), default="GLOBAL", index=True)
+    effective_date: Mapped[str] = mapped_column(String(10))  # ISO date string
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    source: Mapped[str] = mapped_column(String(255))
+    sections: Mapped[list[dict]] = mapped_column(JSONB)  # [{section, content}, ...]
+
+
+class KnowledgeChunk(TimestampMixin, Base):
+    """Indexed chunk of a knowledge document (Phase 12 RAG).
+
+    One row per document section (stable chunking). ``content_hash`` detects
+    corpus changes; ``term_freq`` stores the embedding vector so retrieval is
+    a pure read + score computation (no re-embedding at query time).
+    """
+
+    __tablename__ = "knowledge_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chunk_id: Mapped[str] = mapped_column(String(140), unique=True, index=True)
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_documents.document_id", ondelete="CASCADE"), index=True
+    )
+    section: Mapped[str] = mapped_column(String(255))
+    content: Mapped[str] = mapped_column(Text)
+    term_freq: Mapped[dict] = mapped_column(JSONB)  # sparse TF vector
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)  # SHA-256
+    chunk_index: Mapped[int] = mapped_column(Integer, default=0)
+
+    __table_args__ = (UniqueConstraint("document_id", "section", name="uq_knowledge_doc_section"),)
