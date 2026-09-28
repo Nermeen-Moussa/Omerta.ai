@@ -642,7 +642,7 @@ capability, and whether its content changed since creation.
   reproducible and downgrade-verified.
 - Live end-to-end validation (dev DB): `uv run python scripts/phase11_live_validation.py`.
 
-## Tests & linting
+## Services & ports
 
 | Service | Port | Credentials (local dev only) |
 | --- | --- | --- |
