@@ -42,6 +42,7 @@ class EvidenceCategory(StrEnum):
     IP = "IP"
     GRAPH = "GRAPH"
     RISK = "RISK"
+    KNOWLEDGE = "KNOWLEDGE"
 
 
 class EvidenceItem(BaseModel):
@@ -130,6 +131,10 @@ class InvestigationState(BaseModel):
     risk_features: dict[str, Any] | None = None
     risk_feature_importance: dict[str, Any] | None = None
     previous_risk_events: dict[str, Any] | None = None
+
+    # --- Knowledge capability context (Phase 12 RAG, provenance preserved) ---
+    knowledge_query: str | None = None
+    knowledge_results: dict[str, Any] | None = None
 
     # --- Collected evidence ---
     evidence: Annotated[list[EvidenceItem], operator.add] = []

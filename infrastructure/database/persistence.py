@@ -44,12 +44,14 @@ TIER_BY_CATEGORY: dict[str, str] = {
     "IP": EvidenceTier.FACT.value,
     "GRAPH": EvidenceTier.STRUCTURAL_SIGNAL.value,
     "RISK": EvidenceTier.MODEL_OUTPUT.value,
+    "KNOWLEDGE": EvidenceTier.KNOWLEDGE.value,
 }
 
 PRODUCER_BY_SOURCE: dict[str, str] = {
     "transaction": "TransactionCapability",
     "graph": "GraphCapability",
     "risk": "RiskCapability",
+    "knowledge": "KnowledgeCapability",
 }
 
 

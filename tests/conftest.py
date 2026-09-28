@@ -243,3 +243,16 @@ async def db_session(test_engine: AsyncEngine, seeded_db: None) -> AsyncIterator
         finally:
             await session.close()
             await trans.rollback()
+
+
+@pytest.fixture
+async def knowledge_session(
+    test_engine: AsyncEngine, seeded_db: None
+) -> AsyncIterator[AsyncSession]:
+    """Committed-session over a freshly seeded DB (Phase 12 knowledge included).
+
+    Unlike ``db_session`` this session may commit (ingestion upserts are part
+    of the behavior under test); the next test's ``seeded_db`` reset cleans up.
+    """
+    async with AsyncSession(test_engine, expire_on_commit=False) as session:
+        yield session

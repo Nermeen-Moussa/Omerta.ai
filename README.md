@@ -587,6 +587,51 @@ It is an engineering check, not a statistical benchmark.
   (0.87) vs mock-score (0.9) distinction is regression-guarded by dedicated
   tests.
 
+## RAG + Knowledge MCP (Phase 12)
+
+The knowledge layer stores curated AML reference data — policies, regulations,
+typologies, procedures — as *data* and answers controlled queries over it.
+Everything is deterministic: no LLM, no external embedding service, no network.
+
+### Architecture
+
+```text
+Curated corpus (infrastructure/knowledge/corpus.py)
+    → deterministic ingestion (idempotent upsert, one chunk per section)
+    → knowledge_documents + knowledge_chunks (PostgreSQL, migration c8d3e6a71b45)
+    → TF-IDF retrieval (infrastructure/knowledge/embeddings.py, dependency-free)
+    → KnowledgeService (domain/services/knowledge_service.py)
+    → Knowledge MCP (mcp_servers/knowledge_server: search_knowledge,
+      get_document, get_document_section)
+    → KnowledgeCapability → load_knowledge_context node in the LangGraph run
+```
+
+### Provenance & safety
+
+- Every retrieved chunk carries `document_id`, `document_title`,
+  `document_type`, `section`, `jurisdiction`, `effective_date`, `version`,
+  `content`, and a retrieval `score` — an agent citation that does not resolve
+  to these fields is invalid.
+- Document content is treated strictly as **data, never instructions** (schema
+  note + agent prompt rule 5); the agent must cite document + section and is
+  forbidden from inventing or altering regulation citations.
+- Empty retrieval is a valid, explicit outcome — results are never padded with
+  irrelevant material, and scores are never fabricated for non-matches.
+- Old vs current policy versions stay distinct, versioned facts.
+
+### Tests
+
+`test_knowledge_embeddings.py` (12), `test_knowledge_mcp.py` (9),
+`test_knowledge_service.py` (8), `test_knowledge_security.py` (6),
+`test_knowledge_agent.py` (5), `test_knowledge_persistence.py` (4),
+`test_knowledge_evaluation.py` (5) — 49 tests covering deterministic ranking,
+provenance resolution, hostile-document injection (treated as inert data),
+retrieval degradation, idempotent ingestion, KNOWLEDGE-tier persistence,
+reconstruction, and scenario-based RAG evaluation for TXN-001 / TXN-1006 /
+TXN-1001.
+
+Smoke test: `uv run python scripts/smoke_knowledge_mcp.py` (4th MCP server).
+
 ## Full Evidence & Audit System (Phase 11)
 
 Evidence is a durable, immutable, traceable audit artifact: every item answers
@@ -678,5 +723,5 @@ The implementation follows small, testable vertical slices. Complete so far:
 Phase 1 (foundation), Phase 4 (PostgreSQL), Phase 5 (Transaction MCP), Phase 6
 (Graph MCP), Phase 7 (Risk MCP), Phase 8 (LangGraph orchestrator), Phase 9
 (Investigator Agent + LLM layer + run persistence), Phase 10 (end-to-end
-hardening & evaluation), and Phase 11 (full evidence & audit system). Remaining:
-RAG/Knowledge MCP, case review API, ML Risk Engine.
+hardening & evaluation), Phase 11 (full evidence & audit system), and Phase 12
+(RAG + Knowledge MCP). Remaining: case review API, ML Risk Engine.

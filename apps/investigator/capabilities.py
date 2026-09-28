@@ -142,6 +142,36 @@ class GraphCapability:
         return await self._call("find_fraud_ring", account_id, max_depth, limit)
 
 
+class KnowledgeCapability:
+    """Read-only knowledge retrieval via the Phase 12 service (RAG).
+
+    Returns ranked stored policy/typology sections with full provenance.
+    Every failure degrades to ``None`` - knowledge retrieval is supporting
+    context, never a hard dependency of an investigation.
+    """
+
+    async def _invoke(self, method: str, *args: Any) -> BaseModel:
+        """Perform the knowledge service call (override point for tests)."""
+        from domain.services.knowledge_service import KnowledgeService
+
+        session = AsyncSession(get_engine(), expire_on_commit=False)
+        try:
+            return await getattr(KnowledgeService(session), method)(*args)
+        finally:
+            await session.close()
+
+    async def _call(self, method: str, *args: Any) -> dict[str, Any] | None:
+        try:
+            result = await self._invoke(method, *args)
+            return _to_payload(result)
+        except Exception:
+            logger.exception("capability failed: knowledge %s", method)
+            return None
+
+    async def search_knowledge(self, query: str, top_k: int) -> dict[str, Any] | None:
+        return await self._call("search", query, top_k)
+
+
 class RiskCapability:
     """Read-only risk signals via the Phase 7 service (MOCK provenance)."""
 

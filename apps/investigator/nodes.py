@@ -27,6 +27,7 @@ from domain.schemas import ToolErrorOut
 
 from apps.investigator.capabilities import (
     GraphCapability,
+    KnowledgeCapability,
     RiskCapability,
     TransactionCapability,
 )
@@ -43,6 +44,7 @@ logger = logging.getLogger(__name__)
 # Existing service limits (single source of truth stays in the services).
 CONTEXT_LIMIT = 20
 MAX_DEPTH = 3
+KNOWLEDGE_TOP_K = 3  # Phase 12: retrieved knowledge sections per investigation
 
 _investigations = 0
 
@@ -449,6 +451,89 @@ async def load_risk_context(
             AuditEventType.RISK_CONTEXT_LOADED,
             "load_risk_context",
             sections_retrieved=len(results) - len(missing),
+        )
+    ]
+    return updates
+
+
+# --------------------------------------------------------------------------- #
+# Node 5b: load_knowledge_context (Phase 12 RAG)
+# --------------------------------------------------------------------------- #
+async def load_knowledge_context(
+    state: InvestigationState, *, knowledge: KnowledgeCapability | None = None
+) -> dict[str, Any]:
+    """Retrieve stored policy/typology knowledge for the signals in this run.
+
+    Deterministic TF-IDF retrieval over the curated corpus (Knowledge MCP
+    service). The query derives from the structural/risk signals observed in
+    this investigation. Retrieval is supporting context: any failure yields a
+    warning and an empty result - it never fails the investigation.
+    """
+    cap = knowledge or KnowledgeCapability()
+    started = time.perf_counter()
+    if state.transaction is None:
+        return {
+            "warnings": [
+                _validation_error("transaction", "knowledge context skipped: no transaction loaded")
+            ],
+            "node_timings_ms": {"load_knowledge_context": (time.perf_counter() - started) * 1000},
+        }
+
+    # Query derives from observed signals (deterministic; short keyword set).
+    query_parts = ["money laundering"]
+    graph_signals = (state.fraud_ring_signals or {}).get("signals", [])
+    if graph_signals:
+        query_parts.append("shared device fraud ring")
+    if (state.shared_devices or {}).get("shared_devices"):
+        query_parts.append("shared device")
+    if (state.shared_ips or {}).get("shared_ips"):
+        query_parts.append("shared ip")
+    risk = state.risk_score or {}
+    if risk.get("risk_level") == "HIGH":
+        query_parts.append("new device account takeover threshold")
+    txn = state.transaction or {}
+    try:
+        amount = float(txn.get("amount") or 0)
+        if amount >= 10000:
+            query_parts.append("large transaction review threshold")
+        elif amount >= 4000:
+            query_parts.append("escalation rule")
+    except (TypeError, ValueError):
+        pass
+    query = " ".join(query_parts)
+
+    results = await cap.search_knowledge(query, KNOWLEDGE_TOP_K)
+    missing = results is None
+    chunks: list[dict[str, Any]] = results.get("results", []) if results else []
+
+    specs: list[tuple[EvidenceCategory, str, str, str, dict[str, Any]]] = []
+    if chunks:
+        specs.append(
+            (
+                EvidenceCategory.KNOWLEDGE,
+                "knowledge",
+                state.transaction_id,
+                "Retrieved policy/typology knowledge (cited sections)",
+                {"query": query, "chunks": chunks},
+            )
+        )
+
+    updates: dict[str, Any] = {"knowledge_query": query}
+    if results is not None:
+        updates["knowledge_results"] = results
+    if specs:
+        updates["evidence"] = _evidence_batch(state, specs)
+    if missing:
+        updates["warnings"] = [_dependency_error("knowledge", "knowledge retrieval unavailable")]
+    duration_ms = (time.perf_counter() - started) * 1000
+    _log_event("knowledge_loaded", state, "load_knowledge_context", duration_ms=duration_ms)
+    updates["node_timings_ms"] = {"load_knowledge_context": duration_ms}
+    updates["audit_events"] = [
+        _audit(
+            AuditEventType.KNOWLEDGE_CONTEXT_LOADED,
+            "load_knowledge_context",
+            query_terms=len(query.split()),
+            chunks=len(chunks),
         )
     ]
     return updates

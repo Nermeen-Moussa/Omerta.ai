@@ -38,7 +38,7 @@ def test_txn001_evidence_tiers_map_to_capabilities(pipeline_env) -> None:
         )
     )
     tiers = {e["tier"] for e in audit["evidence"]}
-    assert tiers == {"FACT", "STRUCTURAL_SIGNAL", "MODEL_OUTPUT"}
+    assert tiers == {"FACT", "STRUCTURAL_SIGNAL", "MODEL_OUTPUT", "KNOWLEDGE"}
 
     by_category = {e["category"]: e for e in audit["evidence"]}
     # Facts: PostgreSQL / transaction capability.
@@ -53,6 +53,9 @@ def test_txn001_evidence_tiers_map_to_capabilities(pipeline_env) -> None:
     # Risk: model output with MOCK provenance preserved.
     assert by_category["RISK"]["tier"] == "MODEL_OUTPUT"
     assert by_category["RISK"]["producer"] == "RiskCapability"
+    # Knowledge (Phase 12): retrieved stored reference data.
+    assert by_category["KNOWLEDGE"]["tier"] == "KNOWLEDGE"
+    assert by_category["KNOWLEDGE"]["producer"] == "KnowledgeCapability"
 
 
 def test_mock_risk_provenance_survives_persistence(pipeline_env) -> None:

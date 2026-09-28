@@ -253,6 +253,8 @@ def test_full_graph_txn001_completes_with_all_context() -> None:
         "risk_features",
         "risk_feature_importance",
         "previous_risk_events",
+        "knowledge_query",
+        "knowledge_results",
     ):
         assert final[key] is not None, f"{key} must be populated"
 
@@ -266,6 +268,7 @@ def test_full_graph_txn001_completes_with_all_context() -> None:
         "IP",
         "GRAPH",
         "RISK",
+        "KNOWLEDGE",
     }
 
 
