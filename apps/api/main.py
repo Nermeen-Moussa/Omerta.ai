@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from infrastructure.database.session import get_engine
 from infrastructure.neo4j import client as graph_client
@@ -34,6 +34,46 @@ app = FastAPI(
     version="0.1.0",
     description="Agentic AI financial-crime investigation platform",
 )
+
+# --------------------------------------------------------------------------- #
+# Security middleware (Phase 17): API-key auth + rate limiting.
+# Both are OFF by default in development/test (no keys configured, limit 0)
+# and activate purely through environment configuration.
+# --------------------------------------------------------------------------- #
+
+_OPEN_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc"}
+
+
+@app.middleware("http")
+async def security_middleware(request, call_next):
+    from infrastructure.security.auth import API_KEY_HEADER, auth_enabled, resolve_role
+    from infrastructure.security.ratelimit import get_limiter
+
+    path = request.url.path
+    # Static dashboard and health probes stay open.
+    if path in _OPEN_PATHS or path.startswith("/static") or path.startswith("/health"):
+        return await call_next(request)
+
+    if auth_enabled():
+        role = resolve_role(request.headers.get(API_KEY_HEADER))
+        if role is None:
+            return JSONResponse(
+                status_code=401,
+                content={"error": "UNAUTHORIZED", "message": "missing or invalid API key"},
+            )
+        request.state.role = role
+
+    limiter = get_limiter()
+    if limiter.rate_per_minute > 0:
+        identity = request.headers.get(API_KEY_HEADER) or (
+            request.client.host if request.client else "unknown"
+        )
+        if not limiter.allow(identity):
+            return JSONResponse(
+                status_code=429,
+                content={"error": "RATE_LIMITED", "message": "too many requests"},
+            )
+    return await call_next(request)
 
 
 @app.get("/health")
@@ -201,9 +241,20 @@ async def _load_detail(investigation_id: str) -> dict[str, Any]:
     from domain.services.case_service import CaseService
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    # Path-parameter hardening: reject control characters / NUL / separators
+    # before anything reaches the database (422, never a 503).
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in investigation_id) or any(
+        sep in investigation_id for sep in ("/", "\\")
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "VALIDATION_ERROR", "message": "invalid identifier"},
+        )
     try:
         async with AsyncSession(get_engine(), expire_on_commit=False) as session:
             return await CaseService(session).get_investigation_detail(investigation_id)
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         raise _to_http_error(exc) from None
 

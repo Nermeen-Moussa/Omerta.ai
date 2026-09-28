@@ -51,6 +51,15 @@ class Settings(BaseSettings):
     # Only 'mock' exists in Phase 7; the future ML engine will add its own.
     risk_provider: str = "mock"
 
+    # --- Security (Phase 17) ---
+    # API keys: unset => auth disabled (local dev/test default). Set to enable
+    # mandatory X-API-Key auth with role-based access. Never commit real keys.
+    api_key_analyst: str | None = None
+    api_key_admin: str | None = None
+    # Rate limiting (requests per minute per key/IP; 0 disables).
+    rate_limit_per_minute: int = 0
+    rate_limit_burst: int | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

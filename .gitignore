@@ -26,3 +26,6 @@ Thumbs.db
 
 # --- Workspace tooling ---
 .freebuff/
+
+# --- Dev server logs ---
+*.log
