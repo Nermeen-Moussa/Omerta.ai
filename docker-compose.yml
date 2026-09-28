@@ -37,6 +37,31 @@ services:
       timeout: 5s
       retries: 10
 
+  backend:
+    image: omerta-backend
+    build:
+      context: .
+    container_name: omerta-api
+    command: >
+      uvicorn apps.api.main:app --host 0.0.0.0 --port 8000
+    environment:
+      # Container-internal addresses (postgres/neo4j service names, default
+      # ports - host port remappings above apply only from the host).
+      DATABASE_URL: postgresql+asyncpg://omerta:omerta_dev_password@postgres:5432/omerta
+      NEO4J_URI: bolt://neo4j:7687
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
 volumes:
   postgres_data:
   neo4j_data:

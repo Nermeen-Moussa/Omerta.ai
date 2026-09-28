@@ -120,6 +120,51 @@ async def health_risk() -> dict[str, str]:
     }
 
 
+@app.get("/health/knowledge")
+async def health_knowledge() -> dict[str, Any]:
+    """Knowledge store health: stored corpus stats (no content exposed)."""
+    from domain.services.knowledge_service import KnowledgeService
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    try:
+        async with AsyncSession(get_engine(), expire_on_commit=False) as session:
+            stats = await KnowledgeService(session).corpus_stats()
+    except Exception as exc:  # noqa: BLE001 - any failure means "not ready"
+        raise HTTPException(status_code=503, detail="knowledge store unreachable") from exc
+    return {
+        "status": "ok",
+        "service": "knowledge",
+        "documents": stats["documents"],
+        "chunks": stats["chunks"],
+        "corpus_version": stats["corpus_version"],
+        "version": app.version,
+    }
+
+
+@app.get("/health/llm")
+async def health_llm() -> dict[str, Any]:
+    """LLM subsystem health: configured provider (fake/deterministic default).
+
+    Reports configuration only - never keys. 'fake' means the deterministic
+    rule-based agent path is active (no external LLM configured).
+    """
+    from infrastructure.config import get_settings
+    from infrastructure.llm.factory import get_llm_provider
+
+    try:
+        provider = get_llm_provider()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail="llm provider unavailable") from exc
+    settings = get_settings()
+    return {
+        "status": "ok",
+        "service": "llm",
+        "provider": provider.name,
+        "configured_external": bool(settings.llm_provider),
+        "version": app.version,
+    }
+
+
 @app.post("/investigations/run")
 async def run_investigation_endpoint(body: InvestigationRunRequest) -> dict[str, Any]:
     """Run one investigation (deterministic; agent report via fake provider

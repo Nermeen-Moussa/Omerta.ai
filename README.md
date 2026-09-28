@@ -717,11 +717,54 @@ are never touched. Test isolation uses reset+seed plus per-test rollback.
 All configuration comes from environment variables — see `.env.example`.
 No secrets are committed; `.env` is git-ignored.
 
+## Deployment (Phase 18)
+
+### Clean environment, exact commands
+
+```bash
+# 1. Services (PostgreSQL 15432, Neo4j 17474/17687; or add the backend service)
+docker compose up -d postgres neo4j
+
+# 2. Database schema + deterministic seed (facts + knowledge corpus)
+uv run alembic upgrade head
+uv run python -m infrastructure.database.seed
+
+# 3. Neo4j graph projection (idempotent)
+uv run python -m infrastructure.neo4j.seed --project-only   # if provided
+# or: uv run python -c "import asyncio; from infrastructure.database.session import create_engine; from infrastructure.neo4j.projection import project_all; asyncio.run(project_all(create_engine()))"
+
+# 4. (Optional) train the ML risk model, then set RISK_PROVIDER=ml
+uv run python scripts/train_risk_model.py
+
+# 5. Start the backend + dashboard
+uv run uvicorn apps.api.main:app --port 8000
+# Dashboard: http://127.0.0.1:8000/   API docs: http://127.0.0.1:8000/docs
+```
+
+With Docker Compose, `docker compose up -d --build backend` starts the API on
+port 8000 with container-internal `DATABASE_URL`/`NEO4J_URI` already set.
+
+### Health checks
+
+`/health` (liveness), `/health/db`, `/health/neo4j`, `/health/risk`,
+`/health/knowledge` (corpus stats), `/health/llm` (provider configuration,
+never keys). Readiness endpoints return 503 when a dependency is unreachable;
+none expose secrets or internals.
+
+### Security configuration
+
+Auth is off by default (dev). To enable: set `API_KEY_ANALYST` and/or
+`API_KEY_ADMIN` (requests then require `X-API-Key`); optionally set
+`RATE_LIMIT_PER_MINUTE` (+ `RATE_LIMIT_BURST`) for 429 throttling. `.env` is
+git-ignored; `.env.example` carries placeholders only.
+
 ## Roadmap
 
 The implementation follows small, testable vertical slices. Complete so far:
-Phase 1 (foundation), Phase 4 (PostgreSQL), Phase 5 (Transaction MCP), Phase 6
-(Graph MCP), Phase 7 (Risk MCP), Phase 8 (LangGraph orchestrator), Phase 9
-(Investigator Agent + LLM layer + run persistence), Phase 10 (end-to-end
-hardening & evaluation), Phase 11 (full evidence & audit system), and Phase 12
-(RAG + Knowledge MCP). Remaining: case review API, ML Risk Engine.
+Phases 1, 4–13 as listed above, plus Phase 14 (real ML risk engine -
+LightGBM over an honestly-labeled synthetic dataset, `RISK_PROVIDER=ml`),
+Phase 15 (advanced agent: indirect-injection defense, scenario evaluation),
+Phase 16 (frontend investigation dashboard - static SPA on the Case API),
+Phase 17 (security hardening: opt-in API-key auth with roles, rate limiting,
+input hardening, tamper evidence), and Phase 18 (deployment, health checks,
+Docker backend, documentation). Remaining: none - see the final report.
