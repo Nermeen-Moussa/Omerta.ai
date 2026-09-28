@@ -38,3 +38,9 @@ class NotFoundError(DomainError):
             resource=resource,
             id=resource_id,
         )
+
+
+class ConflictError(DomainError):
+    """The request conflicts with persisted state (fail-closed integrity)."""
+
+    code = "CONFLICT"
