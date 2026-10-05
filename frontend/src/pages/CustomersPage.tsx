@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Users,
   Search,
@@ -22,6 +23,8 @@ import {
   Sparkles,
   Bot,
   ShieldAlert,
+  MessageSquare,
+  ArrowUpRight,
 } from 'lucide-react';
 import { api } from '../api/client';
 import type { CustomerItem } from '../types';
@@ -648,16 +651,18 @@ export const CustomersPage: React.FC = () => {
                       <div className="h-8 w-8 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-sm">
                         {c.name.charAt(0)}
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-[#F4F7FC] text-sm">{c.name}</span>
                           <span className="font-mono text-xs font-bold text-[#29C5D9]">{c.omerta_user_number}</span>
                           <RiskBadge level={c.risk_level} size="sm" />
-                          <span className="px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 font-mono text-[10px] font-bold border border-rose-500/30">
-                            {c.primary_reason}
-                          </span>
+                          {c.transfer_blocked && (
+                            <span className="px-2 py-0.5 rounded bg-rose-500/15 text-rose-400 font-mono text-[10px] font-bold border border-rose-500/30 flex items-center gap-1">
+                              🔒 Transfer Blocked (3 Strikes)
+                            </span>
+                          )}
                         </div>
-                        <div className="text-xs text-[#71819A] flex items-center gap-3 mt-0.5">
+                        <div className="text-xs text-[#71819A] flex items-center gap-3 mt-0.5 flex-wrap">
                           <span className="flex items-center gap-1 font-mono text-[#F4F7FC]">
                             📞 {c.phone}
                           </span>
@@ -669,14 +674,58 @@ export const CustomersPage: React.FC = () => {
                           <span className="font-mono font-bold text-[#27C58B]">
                             {c.total_balance_egp?.toLocaleString(undefined, { minimumFractionDigits: 2 })} EGP
                           </span>
+                          {c.national_id_number && (
+                            <>
+                              <span>•</span>
+                              <span className="font-mono text-xs text-[#29C5D9] bg-[#29C5D9]/10 px-1.5 py-0.5 rounded border border-[#29C5D9]/30">
+                                ID: {c.national_id_number}
+                              </span>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
 
+                    {/* Prominent Customer Issue & Ticket Banner */}
+                    <Link
+                      to={`/admin/support-cases?search=${encodeURIComponent(c.name || c.omerta_user_number || '')}`}
+                      className="block p-2.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/30 hover:border-amber-500/50 transition-all text-xs space-y-1 group cursor-pointer"
+                      title="Click to open full chat conversation & document review"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] uppercase font-bold text-amber-400 flex items-center gap-1.5">
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          <span>Customer Issue &amp; Support Ticket:</span>
+                        </span>
+                        <span className="text-[10px] text-[#29C5D9] font-bold group-hover:underline flex items-center gap-1">
+                          <span>Open Chat &amp; Case</span>
+                          <ArrowUpRight className="w-3 h-3" />
+                        </span>
+                      </div>
+                      <p className="font-semibold text-white text-xs leading-snug">
+                        {c.customer_issue || c.primary_reason}
+                      </p>
+                      {c.ticket_number && (
+                        <div className="flex items-center gap-2 pt-0.5 text-[11px] text-[#A7B4C8]">
+                          <span className="font-mono text-[#29C5D9] font-bold">Ticket #{c.ticket_number}</span>
+                          {c.ticket_status && (
+                            <span className="px-1.5 py-0.2 rounded bg-[#080D19] border border-[#25344A] text-[#F4F7FC] text-[10px]">
+                              Status: {c.ticket_status}
+                            </span>
+                          )}
+                          {c.has_uploaded_id && (
+                            <span className="px-1.5 py-0.2 rounded bg-[#27C58B]/20 text-[#27C58B] text-[10px] font-bold border border-[#27C58B]/30">
+                              📄 National ID Attached
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </Link>
+
                     {c.recent_audit_events && c.recent_audit_events.length > 0 && (
-                      <div className="bg-[#080D19] p-2.5 rounded-lg border border-[#25344A] text-[11px] space-y-1">
-                        <span className="text-[10px] text-[#71819A] uppercase font-bold tracking-wider">Latest Security Event:</span>
-                        <p className="text-[#F4F7FC] font-mono">
+                      <div className="bg-[#080D19] p-2 rounded-lg border border-[#25344A] text-[11px] space-y-0.5">
+                        <span className="text-[9px] text-[#71819A] uppercase font-bold tracking-wider">Latest Security Event:</span>
+                        <p className="text-[#F4F7FC] font-mono text-[10px]">
                           [{c.recent_audit_events[0].event_type}] — {c.recent_audit_events[0].metadata?.description || 'Security threshold flagged'} ({new Date(c.recent_audit_events[0].created_at).toLocaleTimeString()})
                         </p>
                       </div>
@@ -685,6 +734,16 @@ export const CustomersPage: React.FC = () => {
 
                   {/* Customer Contact & Resolution Actions */}
                   <div className="flex items-center gap-2 self-end md:self-center flex-wrap">
+                    {/* Direct Support Chat & ID Cases */}
+                    <Link
+                      to={`/admin/support-cases?search=${encodeURIComponent(c.name || c.omerta_user_number || '')}`}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-black text-xs transition-colors shadow-xs"
+                      title="Open live support chat, view customer tickets & review National ID verification"
+                    >
+                      <MessageSquare className="h-3.5 w-3.5" />
+                      <span>Support Chat &amp; Cases</span>
+                    </Link>
+
                     <button
                       onClick={() => handleOpenCallModal(c)}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#3978F6] hover:bg-[#3978F6]/90 text-white text-xs font-bold transition-colors shadow-xs cursor-pointer"
@@ -714,7 +773,7 @@ export const CustomersPage: React.FC = () => {
 
                     <button
                       onClick={() => handleResolveRisk(c.customer_id, c.name)}
-                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#27C58B] hover:bg-[#27C58B]/90 text-slate-950 text-xs font-bold transition-colors shadow-xs cursor-pointer"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#27C58B] hover:bg-[#27C58B]/90 text-slate-950 text-xs font-bold transition-colors shadow-xs cursor-pointer"
                       title="Manually clear risk rating to LOW and restore active status"
                     >
                       <Unlock className="h-3.5 w-3.5" />

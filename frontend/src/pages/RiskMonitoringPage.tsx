@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   ShieldAlert,
   RefreshCw,
@@ -15,6 +15,7 @@ import {
   XCircle,
   CheckCircle,
   AlertTriangle,
+  MessageSquare,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { RiskBadge } from '../components/common/RiskBadge';
@@ -557,16 +558,18 @@ export const RiskMonitoringPage: React.FC = () => {
                       <div className="h-8 w-8 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-sm">
                         {c.name.charAt(0)}
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-slate-900 dark:text-white text-sm">{c.name}</span>
                           <span className="font-mono text-xs font-bold text-cyan-400">{c.omerta_user_number}</span>
                           <RiskBadge level={c.risk_level} size="sm" />
-                          <span className="px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 font-mono text-[10px] font-bold border border-rose-500/30">
-                            {c.primary_reason}
-                          </span>
+                          {c.transfer_blocked && (
+                            <span className="px-2 py-0.5 rounded bg-rose-500/15 text-rose-400 font-mono text-[10px] font-bold border border-rose-500/30 flex items-center gap-1">
+                              🔒 Transfer Blocked (3 Strikes)
+                            </span>
+                          )}
                         </div>
-                        <div className="text-xs text-slate-400 flex items-center gap-3 mt-0.5">
+                        <div className="text-xs text-slate-400 flex items-center gap-3 mt-0.5 flex-wrap">
                           <span className="flex items-center gap-1 font-mono text-slate-300">
                             📞 {c.phone}
                           </span>
@@ -578,15 +581,59 @@ export const RiskMonitoringPage: React.FC = () => {
                           <span className="font-mono font-bold text-emerald-400">
                             {c.total_balance_egp?.toLocaleString(undefined, { minimumFractionDigits: 2 })} EGP
                           </span>
+                          {c.national_id_number && (
+                            <>
+                              <span>•</span>
+                              <span className="font-mono text-xs text-cyan-300 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-800/40">
+                                ID: {c.national_id_number}
+                              </span>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
 
+                    {/* Prominent Customer Issue & Ticket Banner */}
+                    <Link
+                      to={`/admin/support-cases?search=${encodeURIComponent(c.name || c.omerta_user_number || '')}`}
+                      className="block p-2.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/30 hover:border-amber-500/50 transition-all text-xs space-y-1 group cursor-pointer"
+                      title="Click to open full chat conversation & document review"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] uppercase font-bold text-amber-400 flex items-center gap-1.5">
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          <span>Customer Issue &amp; Support Ticket:</span>
+                        </span>
+                        <span className="text-[10px] text-cyan-400 font-bold group-hover:underline flex items-center gap-1">
+                          <span>Open Chat &amp; Case</span>
+                          <ArrowUpRight className="w-3 h-3" />
+                        </span>
+                      </div>
+                      <p className="font-semibold text-white text-xs leading-snug">
+                        {c.customer_issue || c.primary_reason}
+                      </p>
+                      {c.ticket_number && (
+                        <div className="flex items-center gap-2 pt-0.5 text-[11px] text-slate-300">
+                          <span className="font-mono text-cyan-400 font-bold">Ticket #{c.ticket_number}</span>
+                          {c.ticket_status && (
+                            <span className="px-1.5 py-0.2 rounded bg-slate-800 text-slate-200 text-[10px]">
+                              Status: {c.ticket_status}
+                            </span>
+                          )}
+                          {c.has_uploaded_id && (
+                            <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30">
+                              📄 National ID Attached
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </Link>
+
                     {/* Recent Security Timeline Snippet */}
                     {c.recent_audit_events && c.recent_audit_events.length > 0 && (
-                      <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800 text-[11px] space-y-1">
-                        <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Latest Security Log:</span>
-                        <p className="text-slate-300 font-mono">
+                      <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800 text-[11px] space-y-0.5">
+                        <span className="text-[9px] text-slate-500 uppercase font-bold tracking-wider">Latest Security Log:</span>
+                        <p className="text-slate-300 font-mono text-[10px]">
                           [{c.recent_audit_events[0].event_type}] — {c.recent_audit_events[0].metadata?.description || 'Security threshold flagged'} ({new Date(c.recent_audit_events[0].created_at).toLocaleTimeString()})
                         </p>
                       </div>
@@ -595,10 +642,20 @@ export const RiskMonitoringPage: React.FC = () => {
 
                   {/* Customer Contact & Resolution Actions */}
                   <div className="flex items-center gap-2 self-end md:self-center flex-wrap">
+                    {/* Direct Support Chat & ID Cases */}
+                    <Link
+                      to={`/admin/support-cases?search=${encodeURIComponent(c.name || c.omerta_user_number || '')}`}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-black text-xs transition-colors shadow-xs"
+                      title="Open live support chat, view customer tickets & review National ID verification"
+                    >
+                      <MessageSquare className="h-3.5 w-3.5" />
+                      <span>Support Chat &amp; Cases</span>
+                    </Link>
+
                     {/* Direct Call Customer */}
                     <button
                       onClick={(e) => handleOpenCallModal(c, e)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors shadow-xs"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors shadow-xs cursor-pointer"
                       title="Initiate phone call verification"
                     >
                       <PhoneCall className="h-3.5 w-3.5" />
@@ -608,7 +665,7 @@ export const RiskMonitoringPage: React.FC = () => {
                     {/* Direct Email Customer */}
                     <button
                       onClick={(e) => handleOpenEmailModal(c, e)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition-colors shadow-xs"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition-colors shadow-xs cursor-pointer"
                       title="Dispatch security notification email"
                     >
                       <Mail className="h-3.5 w-3.5" />
@@ -618,7 +675,7 @@ export const RiskMonitoringPage: React.FC = () => {
                     {/* Agentic AI Forensic Summary */}
                     <button
                       onClick={(e) => handleOpenCustomerAgenticModal(c, e)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-950 to-indigo-950 border border-purple-500/40 hover:border-purple-400 text-purple-300 hover:text-white text-xs font-bold transition-colors shadow-xs"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-950 to-indigo-950 border border-purple-500/40 hover:border-purple-400 text-purple-300 hover:text-white text-xs font-bold transition-colors shadow-xs cursor-pointer"
                       title="View Autonomous Multi-Agent Forensic Investigation Report"
                     >
                       <Sparkles className="h-3.5 w-3.5 text-purple-400" />
@@ -628,7 +685,7 @@ export const RiskMonitoringPage: React.FC = () => {
                     {/* Manual Resolve Risk & Unlock */}
                     <button
                       onClick={() => handleResolveRisk(c.customer_id, c.name)}
-                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shadow-xs"
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shadow-xs cursor-pointer"
                       title="Manually clear risk rating to LOW and restore active status"
                     >
                       <Unlock className="h-3.5 w-3.5" />

@@ -46,14 +46,18 @@ export const RegisterPage: React.FC = () => {
     full_name: '',
     email: '',
     username: '',
+    national_id_number: '',
     password: '',
     confirm_password: '',
+    transfer_password: '',
+    confirm_transfer_password: '',
     preferred_currency: 'EGP',
     initial_balance: 50000,
     device_consent: true,
   });
 
   const [showPassword, setShowPassword] = useState(false);
+  const [showTransferPassword, setShowTransferPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -72,12 +76,32 @@ export const RegisterPage: React.FC = () => {
       setError('You must accept the Banking Terms of Service, Privacy Policy, and Device Security Consent to open an account.');
       return;
     }
+    if (!formData.national_id_number.trim()) {
+      setError('National ID Number is required for KYC compliance.');
+      return;
+    }
     if (formData.password !== formData.confirm_password) {
-      setError('Password and confirmation do not match.');
+      setError('Account password and confirmation do not match.');
       return;
     }
     if (formData.password.length < 8) {
-      setError('Password must be at least 8 characters long.');
+      setError('Account login password must be at least 8 characters long.');
+      return;
+    }
+    if (!formData.transfer_password) {
+      setError('Transfer password is required for money movement.');
+      return;
+    }
+    if (formData.transfer_password !== formData.confirm_transfer_password) {
+      setError('Transfer password and confirmation do not match.');
+      return;
+    }
+    if (formData.transfer_password.length < 6) {
+      setError('Transfer password must be at least 6 characters long.');
+      return;
+    }
+    if (formData.password === formData.transfer_password) {
+      setError('Security Requirement: Transfer password MUST be different from your account login password.');
       return;
     }
 
@@ -93,8 +117,11 @@ export const RegisterPage: React.FC = () => {
         full_name: formData.full_name,
         email: formData.email,
         username: formData.username,
+        national_id_number: formData.national_id_number.trim(),
         password: formData.password,
         confirm_password: formData.confirm_password,
+        transfer_password: formData.transfer_password,
+        confirm_transfer_password: formData.confirm_transfer_password,
         phone: fullPhone,
         country: selectedCountry.code,
         preferred_currency: formData.preferred_currency,
@@ -138,14 +165,14 @@ export const RegisterPage: React.FC = () => {
 
       {/* Main Registration Box */}
       <main className="flex-1 flex items-center justify-center px-4 py-8 relative z-10">
-        <div className="w-full max-w-lg bg-[#101A2B] border border-[#25344A] rounded-2xl p-6 sm:p-8 space-y-6 shadow-2xl">
+        <div className="w-full max-w-xl bg-[#101A2B] border border-[#25344A] rounded-2xl p-6 sm:p-8 space-y-6 shadow-2xl">
           {/* Brand Header */}
           <div className="text-center space-y-1.5">
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#F4F7FC]">
               Create Your Banking Account
             </h1>
             <p className="text-xs text-[#A7B4C8] max-w-md mx-auto">
-              Open your verified account and receive your unique Omerta identifier for instant transfers.
+              Open your verified account with dual-layer security credentials and instant transfer enablement.
             </p>
           </div>
 
@@ -191,21 +218,40 @@ export const RegisterPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Email Address */}
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-[#A7B4C8] mb-1">
-                Email Address
-              </label>
-              <div className="relative">
-                <input
-                  type="email"
-                  required
-                  placeholder="name@example.com"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full pl-9 pr-3 py-2.5 bg-[#080D19] border border-[#25344A] rounded-xl text-xs text-[#F4F7FC] placeholder-[#71819A] focus:outline-none focus:border-[#3978F6] transition-colors"
-                />
-                <Mail className="absolute left-3 top-3 h-4 w-4 text-[#71819A]" />
+            {/* Email Address & National ID */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-[#A7B4C8] mb-1">
+                  Email Address
+                </label>
+                <div className="relative">
+                  <input
+                    type="email"
+                    required
+                    placeholder="name@example.com"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className="w-full pl-9 pr-3 py-2.5 bg-[#080D19] border border-[#25344A] rounded-xl text-xs text-[#F4F7FC] placeholder-[#71819A] focus:outline-none focus:border-[#3978F6] transition-colors"
+                  />
+                  <Mail className="absolute left-3 top-3 h-4 w-4 text-[#71819A]" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-[#A7B4C8] mb-1">
+                  National ID / Passport #
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. 29901011234567"
+                    value={formData.national_id_number}
+                    onChange={(e) => setFormData({ ...formData, national_id_number: e.target.value })}
+                    className="w-full pl-9 pr-3 py-2.5 bg-[#080D19] border border-[#25344A] rounded-xl text-xs font-mono text-[#F4F7FC] placeholder-[#71819A] focus:outline-none focus:border-[#3978F6] transition-colors"
+                  />
+                  <ShieldCheck className="absolute left-3 top-3 h-4 w-4 text-[#29C5D9]" />
+                </div>
               </div>
             </div>
 
@@ -252,45 +298,83 @@ export const RegisterPage: React.FC = () => {
               </p>
             </div>
 
-            {/* Password and Confirm */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-[#A7B4C8] mb-1">
-                  Password
-                </label>
+            {/* SECTION 1: Account Login Password */}
+            <div className="p-3.5 rounded-xl bg-[#080D19]/70 border border-[#25344A]/80 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#3978F6] flex items-center gap-1.5">
+                  <Lock className="h-3.5 w-3.5" />
+                  1. Account Login Password
+                </span>
+                <span className="text-[10px] text-[#71819A]">Used for web login &amp; dashboard</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="relative">
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
-                    placeholder="Min 8 characters"
+                    placeholder="Min 8 chars login password"
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full pl-9 pr-9 py-2.5 bg-[#080D19] border border-[#25344A] rounded-xl text-xs text-[#F4F7FC] placeholder-[#71819A] focus:outline-none focus:border-[#3978F6] transition-colors"
+                    className="w-full pl-3 pr-9 py-2 bg-[#101A2B] border border-[#25344A] rounded-lg text-xs text-[#F4F7FC] placeholder-[#71819A] focus:outline-none focus:border-[#3978F6] transition-colors"
                   />
-                  <Lock className="absolute left-3 top-3 h-4 w-4 text-[#71819A]" />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-2.5 top-3 text-[#71819A] hover:text-[#F4F7FC]"
+                    className="absolute right-2.5 top-2.5 text-[#71819A] hover:text-[#F4F7FC]"
                   >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4 text-[#A7B4C8]" />}
+                    {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5 text-[#A7B4C8]" />}
                   </button>
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-[#A7B4C8] mb-1">
-                  Confirm Password
-                </label>
                 <input
                   type={showPassword ? 'text' : 'password'}
                   required
-                  placeholder="Repeat password"
+                  placeholder="Repeat login password"
                   value={formData.confirm_password}
                   onChange={(e) => setFormData({ ...formData, confirm_password: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-[#080D19] border border-[#25344A] rounded-xl text-xs text-[#F4F7FC] placeholder-[#71819A] focus:outline-none focus:border-[#3978F6] transition-colors"
+                  className="w-full px-3 py-2 bg-[#101A2B] border border-[#25344A] rounded-lg text-xs text-[#F4F7FC] placeholder-[#71819A] focus:outline-none focus:border-[#3978F6] transition-colors"
                 />
               </div>
+            </div>
+
+            {/* SECTION 2: Dedicated Transfer Password */}
+            <div className="p-3.5 rounded-xl bg-[#080D19]/70 border border-[#29C5D9]/30 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#29C5D9] flex items-center gap-1.5">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  2. Money Transfer Password
+                </span>
+                <span className="text-[10px] text-[#29C5D9]/80 font-semibold">Must differ from login password</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="relative">
+                  <input
+                    type={showTransferPassword ? 'text' : 'password'}
+                    required
+                    placeholder="Min 6 chars transfer password"
+                    value={formData.transfer_password}
+                    onChange={(e) => setFormData({ ...formData, transfer_password: e.target.value })}
+                    className="w-full pl-3 pr-9 py-2 bg-[#101A2B] border border-[#25344A] rounded-lg text-xs text-[#F4F7FC] placeholder-[#71819A] focus:outline-none focus:border-[#29C5D9] transition-colors"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowTransferPassword(!showTransferPassword)}
+                    className="absolute right-2.5 top-2.5 text-[#71819A] hover:text-[#F4F7FC]"
+                  >
+                    {showTransferPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5 text-[#A7B4C8]" />}
+                  </button>
+                </div>
+                <input
+                  type={showTransferPassword ? 'text' : 'password'}
+                  required
+                  placeholder="Repeat transfer password"
+                  value={formData.confirm_transfer_password}
+                  onChange={(e) => setFormData({ ...formData, confirm_transfer_password: e.target.value })}
+                  className="w-full px-3 py-2 bg-[#101A2B] border border-[#25344A] rounded-lg text-xs text-[#F4F7FC] placeholder-[#71819A] focus:outline-none focus:border-[#29C5D9] transition-colors"
+                />
+              </div>
+              <p className="text-[10px] text-[#71819A]">
+                This password authorizes money movement. Keep it secret and never share it.
+              </p>
             </div>
 
             {/* Initial Balance */}

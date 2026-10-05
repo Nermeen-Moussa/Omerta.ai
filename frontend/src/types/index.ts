@@ -25,6 +25,14 @@ export interface CustomerProfile {
   name: string;
   email: string;
   phone?: string;
+  national_id_number?: string;
+  identity_status?: 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'REJECTED';
+  transfer_status?: 'ACTIVE' | 'BLOCKED' | 'SUSPENDED';
+  transfer_failed_attempts?: number;
+  transfer_blocked_at?: string;
+  transfer_unblocked_at?: string;
+  is_transfer_locked?: boolean;
+  require_transfer_password_change?: boolean;
   declared_country: string;
   preferred_currency: string;
   device_consent: boolean;
@@ -125,11 +133,103 @@ export interface RegisterFormData {
   username: string;
   password: string;
   confirm_password: string;
+  transfer_password?: string;
+  confirm_transfer_password?: string;
+  national_id_number?: string;
+  phone?: string;
   country: string;
   preferred_currency: string;
   initial_balance: number;
   device_consent: boolean;
 }
+
+export type TicketIssueType =
+  | 'TRANSFER_BLOCKED'
+  | 'FORGOTTEN_TRANSFER_PASSWORD'
+  | 'TRANSFER_PASSWORD_LOCK'
+  | 'IDENTITY_VERIFICATION'
+  | 'ACCOUNT_SECURITY'
+  | 'TRANSACTION_ISSUE'
+  | 'OTHER'
+  | string;
+
+export type TicketStatus = 'OPEN' | 'IN_PROGRESS' | 'WAITING_ON_CUSTOMER' | 'RESOLVED' | 'CLOSED' | string;
+export type TicketPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT' | 'CRITICAL' | string;
+export type MessageSenderRole = 'CUSTOMER' | 'ADMINISTRATOR' | 'FRAUD_ANALYST' | 'SENIOR_INVESTIGATOR' | 'AUDITOR' | 'SYSTEM' | string;
+export type IdentityVerificationStatus = 'NOT_VERIFIED' | 'PENDING' | 'PENDING_REVIEW' | 'VERIFIED' | 'REJECTED' | 'NOT_REQUIRED' | 'SUBMITTED' | 'UNDER_REVIEW' | 'EXPIRED' | string;
+
+export interface SupportMessageItem {
+  id: number;
+  ticket_id: number;
+  sender_user_id: number | null;
+  sender_name: string;
+  sender_role: MessageSenderRole;
+  message_text: string;
+  attachment_url?: string | null;
+  attachment_name?: string | null;
+  attachment_type?: string;
+  is_internal_note?: boolean;
+  created_at: string;
+}
+
+export interface IdentityVerificationItem {
+  id: number;
+  ticket_id: number;
+  customer_id: number;
+  national_id_number: string;
+  document_type: string;
+  document_front_url: string;
+  document_back_url?: string | null;
+  status: IdentityVerificationStatus;
+  reviewed_by_user_id?: number | null;
+  reviewer_notes?: string | null;
+  reviewed_at?: string | null;
+  created_at: string;
+}
+
+export interface SupportTicketItem {
+  id: number;
+  ticket_id?: string;
+  ticket_number: string;
+  customer_id: number;
+  customer_name?: string;
+  customer_email?: string;
+  omerta_user_number?: string;
+  account_id?: number | null;
+  account_number?: string | null;
+  issue_type: TicketIssueType;
+  ticket_type?: string;
+  requires_identity_verification?: boolean;
+  subject: string;
+  description: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  assigned_to_user_id?: number | null;
+  assigned_to_name?: string | null;
+  transfer_blocked: boolean;
+  identity_verification_id?: number | null;
+  identity_status?: IdentityVerificationStatus | null;
+  national_id_number?: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at?: string | null;
+  messages_count?: number;
+  messages?: SupportMessageItem[];
+  identity_verification?: IdentityVerificationItem | null;
+  customer?: {
+    id?: string | null;
+    name?: string | null;
+    omerta_user_number?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    transfer_status?: string | null;
+    identity_status?: string | null;
+    national_id_number?: string | null;
+    require_transfer_password_change?: boolean;
+    failed_attempts?: number;
+  };
+}
+
 
 export interface AccountItem {
   id: number;
@@ -175,6 +275,8 @@ export interface DeviceItem {
   is_rooted: boolean;
   session_count?: number;
   accounts_count?: number;
+  account_count?: number;
+  is_shared?: boolean;
   risk_level?: RiskLevel | string;
   status?: string;
   first_seen?: string;
@@ -197,12 +299,43 @@ export interface CaseItem {
   evidence_count?: number;
 }
 
+export interface InflowSourceItem {
+  sender_name: string;
+  sender_account: string;
+  amount: number;
+  currency: string;
+  timestamp: string;
+  risk_score?: number;
+  risk_level?: string;
+}
+
+export interface OutflowDestinationItem {
+  recipient_name: string;
+  recipient_account: string;
+  amount: number;
+  currency: string;
+  timestamp: string;
+  risk_score?: number;
+  risk_level?: string;
+}
+
 export interface GraphNode {
   id: string;
   label: string;
   type: string;
   risk_score?: number;
   risk_level?: RiskLevel | string;
+  customer_name?: string;
+  omerta_user_number?: string;
+  balance?: number;
+  currency?: string;
+  inflow_total?: number;
+  inflow_count?: number;
+  inflow_sources?: InflowSourceItem[];
+  outflow_total?: number;
+  outflow_count?: number;
+  outflow_destinations?: OutflowDestinationItem[];
+  net_flow?: number;
   properties?: Record<string, any>;
   details?: Record<string, any>;
   x?: number;
@@ -214,7 +347,11 @@ export interface GraphLink {
   target: string;
   type: string;
   label?: string;
+  amount?: number;
+  currency?: string;
+  timestamp?: string;
   weight?: number;
+  risk_score?: number;
   is_suspicious?: boolean;
   properties?: Record<string, any>;
 }

@@ -174,6 +174,121 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(telemetryData),
     }),
+  changeTransferPassword: (data: {
+    new_transfer_password: string;
+    confirm_transfer_password: string;
+    current_transfer_password?: string;
+  }) =>
+    apiRequest('/customer/transfer-password/change', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  // Customer Support & Security Cases (Helpdesk & WhatsApp-style Chat)
+  getCustomerSupportTickets: (params: Record<string, any> = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') q.append(k, String(v));
+    });
+    return apiRequest(`/support/tickets?${q.toString()}`);
+  },
+  getCustomerSupportTicket: (ticketId: number | string) => apiRequest(`/support/tickets/${ticketId}`),
+  createSupportTicket: (data: {
+    issue_type: string;
+    subject: string;
+    description: string;
+    account_id?: string;
+    priority?: string;
+    attachment_url?: string;
+    attachment_name?: string;
+    attachment_type?: string;
+  }) =>
+    apiRequest('/support/tickets', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  sendSupportMessage: (
+    ticketId: number | string,
+    data: {
+      message_text: string;
+      attachment_url?: string;
+      attachment_name?: string;
+      attachment_type?: string;
+    }
+  ) =>
+    apiRequest(`/support/tickets/${ticketId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  uploadSupportIdDocument: (
+    ticketId: number | string,
+    data: {
+      national_id_number: string;
+      document_type?: string;
+      document_front_url: string;
+      document_back_url?: string;
+    }
+  ) =>
+    apiRequest(`/support/tickets/${ticketId}/upload-id`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  // Admin & Auditor Support Cases Control Center
+  getAdminSupportCases: (params: Record<string, any> = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') q.append(k, String(v));
+    });
+    return apiRequest(`/support/admin/cases?${q.toString()}`);
+  },
+  getAdminSupportCase: (ticketId: number | string) => apiRequest(`/support/admin/cases/${ticketId}`),
+  adminSendSupportMessage: (
+    ticketId: number | string,
+    data: {
+      message_text: string;
+      attachment_url?: string;
+      attachment_name?: string;
+      attachment_type?: string;
+    }
+  ) =>
+    apiRequest(`/support/admin/cases/${ticketId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  adminVerifyIdentityDecision: (
+    caseId: number | string,
+    data: {
+      decision: 'VERIFIED' | 'REJECTED';
+      reviewer_notes: string;
+    }
+  ) =>
+    apiRequest(`/support/admin/cases/${caseId}/verify-identity`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  adminRestoreTransferAccess: (
+    caseId: number | string,
+    data: {
+      confirmation: boolean;
+      reason?: string;
+    }
+  ) =>
+    apiRequest(`/support/admin/cases/${caseId}/restore-transfer`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  adminUpdateTicketStatus: (
+    ticketId: number | string,
+    data: {
+      status: string;
+      assigned_to_user_id?: number;
+    }
+  ) =>
+    apiRequest(`/support/admin/cases/${ticketId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
 
 
   // Admin Control Center Endpoints
@@ -320,6 +435,10 @@ export const api = {
       if (v !== undefined && v !== null && v !== '') q.append(k, String(v));
     });
     return apiRequest(`/network/graph?${q.toString()}`);
+  },
+
+  getNetworkSearchSuggestions: (query: string) => {
+    return apiRequest(`/network/search-suggestions?q=${encodeURIComponent(query)}`);
   },
 
   getCases: (params: Record<string, any> = {}) => {

@@ -25,6 +25,7 @@ import { AnalyticsPage } from './pages/AnalyticsPage';
 import { AuditLogsPage } from './pages/AuditLogsPage';
 import { AiAssistantPage } from './pages/AiAssistantPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { SupportCasesPage } from './pages/SupportCasesPage';
 
 // Customer Banking Pages
 import { CustomerDashboardPage } from './pages/customer/CustomerDashboardPage';
@@ -33,6 +34,7 @@ import { CustomerAccountsPage } from './pages/customer/CustomerAccountsPage';
 import { CustomerTransactionsPage } from './pages/customer/CustomerTransactionsPage';
 import { CustomerSecurityPage } from './pages/customer/CustomerSecurityPage';
 import { CustomerProfilePage } from './pages/customer/CustomerProfilePage';
+import { CustomerSupportPage } from './pages/customer/CustomerSupportPage';
 
 // Protected Route Component
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -103,6 +105,7 @@ export const App: React.FC = () => {
                 <Route path="transactions" element={<CustomerTransactionsPage />} />
                 <Route path="security" element={<CustomerSecurityPage />} />
                 <Route path="profile" element={<CustomerProfilePage />} />
+                <Route path="support" element={<CustomerSupportPage />} />
               </Route>
 
               {/* Admin Control Center Routes */}
@@ -116,6 +119,7 @@ export const App: React.FC = () => {
                 <Route path="transactions/:id" element={<TransactionDetailPage />} />
                 <Route path="risk-monitoring" element={<RiskMonitoringPage />} />
                 <Route path="investigations" element={<InvestigationsPage />} />
+                <Route path="support-cases" element={<SupportCasesPage />} />
                 <Route path="devices" element={<AdminDevicesPage />} />
                 <Route path="network" element={<NetworkAnalysisPage />} />
                 <Route path="network-analysis" element={<NetworkAnalysisPage />} />
@@ -125,6 +129,7 @@ export const App: React.FC = () => {
                 <Route path="ai-assistant" element={<AiAssistantPage />} />
                 <Route path="settings" element={<SettingsPage />} />
               </Route>
+
 
               {/* Legacy fallback aliases */}
               <Route path="/dashboard" element={<RootRedirector />} />

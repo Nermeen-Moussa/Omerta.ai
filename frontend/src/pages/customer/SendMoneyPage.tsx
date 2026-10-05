@@ -17,9 +17,9 @@ import {
   ChevronDown,
   AlertTriangle,
   RefreshCw,
-  LogOut,
   Smartphone,
   Hash,
+  KeyRound,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
@@ -55,8 +55,9 @@ const COUNTRY_OPTIONS: CountryOption[] = [
 ];
 
 export const SendMoneyPage: React.FC = () => {
-  const { customer, logout } = useAuth();
+  const { customer, refreshCustomerProfile } = useAuth();
   const navigate = useNavigate();
+
 
   // Multi-step transfer state: 1 = Recipient, 2 = Amount & Account, 3 = Confirm, 4 = Receipt
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
@@ -86,22 +87,49 @@ export const SendMoneyPage: React.FC = () => {
   const [receipt, setReceipt] = useState<TransferReceipt | null>(null);
   const [copiedReceipt, setCopiedReceipt] = useState(false);
 
-  // Security modals
+  // Security modals & status
   const [vpnModalOpen, setVpnModalOpen] = useState(false);
   const [vpnDetails, setVpnDetails] = useState<{ isp?: string; country?: string; org?: string; reason?: string } | null>(null);
   const [isRecheckingVpn, setIsRecheckingVpn] = useState(false);
 
-  const [lockoutModalOpen, setLockoutModalOpen] = useState(false);
-  const [lockoutMessage, setLockoutMessage] = useState<string>('');
+  const [transferBlockedModalOpen, setTransferBlockedModalOpen] = useState(false);
+  const [transferBlockedMessage, setTransferBlockedMessage] = useState<string>('');
+  const [isTransferBlocked, setIsTransferBlocked] = useState<boolean>(false);
 
-  // Load customer accounts
+  // Restore & Set New Transfer Password Modal (Post-Restoration)
+  const [passwordChangeModalOpen, setPasswordChangeModalOpen] = useState(false);
+  const [newTransferPassword, setNewTransferPassword] = useState('');
+  const [confirmTransferPassword, setConfirmTransferPassword] = useState('');
+  const [passwordModalLoading, setPasswordModalLoading] = useState(false);
+  const [passwordModalError, setPasswordModalError] = useState<string | null>(null);
+  const [passwordModalSuccess, setPasswordModalSuccess] = useState(false);
+  const [showNewPasswordText, setShowNewPasswordText] = useState(false);
+
+  // Load customer accounts and fresh profile status
   useEffect(() => {
-    const fetchAccounts = async () => {
+    const fetchAccountsAndStatus = async () => {
       try {
-        const res = await api.getCustomerAccounts();
-        setAccounts(res);
-        if (res.length > 0) {
-          setSelectedAccount(res[0]);
+        const [accRes, profileRes] = await Promise.allSettled([
+          api.getCustomerAccounts(),
+          api.getCustomerProfile(),
+        ]);
+
+        if (accRes.status === 'fulfilled') {
+          setAccounts(accRes.value);
+          if (accRes.value.length > 0) {
+            setSelectedAccount(accRes.value[0]);
+          }
+        }
+        if (profileRes.status === 'fulfilled' && profileRes.value) {
+          if (profileRes.value.transfer_status === 'BLOCKED') {
+            setIsTransferBlocked(true);
+            setTransferBlockedModalOpen(true);
+            setTransferBlockedMessage(
+              'Transfers are currently locked due to 3 incorrect transfer password attempts. Please submit your National ID verification in Support to restore privileges.'
+            );
+          } else if (profileRes.value.require_transfer_password_change) {
+            setPasswordChangeModalOpen(true);
+          }
         }
       } catch {
         const fallback: CustomerAccount[] = [
@@ -111,11 +139,67 @@ export const SendMoneyPage: React.FC = () => {
         setSelectedAccount(fallback[0]);
       }
     };
-    fetchAccounts();
+    fetchAccountsAndStatus();
   }, []);
+
+  const handleChangeTransferPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordModalError(null);
+
+    if (!newTransferPassword) {
+      setPasswordModalError('Please enter a new transfer password.');
+      return;
+    }
+    if (newTransferPassword.length < 8) {
+      setPasswordModalError('Transfer password must be at least 8 characters long.');
+      return;
+    }
+    if (newTransferPassword !== confirmTransferPassword) {
+      setPasswordModalError('New transfer password and confirmation do not match.');
+      return;
+    }
+
+    setPasswordModalLoading(true);
+    try {
+      await api.changeTransferPassword({
+        new_transfer_password: newTransferPassword,
+        confirm_transfer_password: confirmTransferPassword,
+      });
+
+      setPasswordModalSuccess(true);
+      if (refreshCustomerProfile) {
+        await refreshCustomerProfile();
+      }
+
+      setTimeout(() => {
+        setPasswordChangeModalOpen(false);
+        setPasswordModalSuccess(false);
+        setNewTransferPassword('');
+        setConfirmTransferPassword('');
+      }, 1800);
+    } catch (err: any) {
+      setPasswordModalError(err.message || 'Failed to update transfer password.');
+    } finally {
+      setPasswordModalLoading(false);
+    }
+  };
+
+  const isPasswordChangeRequired = Boolean(customer?.require_transfer_password_change);
 
   // Quick recipient lookup handler
   const handleLookup = async (targetValue?: string) => {
+    if (isTransferBlocked) {
+      setLookupError('Transfer services are currently restricted due to security hold. Please contact support.');
+      return;
+    }
+
+    if (isPasswordChangeRequired) {
+      setPasswordModalError(null);
+      setPasswordChangeModalOpen(true);
+      setLookupError('Action Required: Please set your new transfer password first before sending money.');
+      return;
+    }
+
     let valueToQuery = '';
     if (targetValue) {
       valueToQuery = targetValue.trim();
@@ -192,7 +276,7 @@ export const SendMoneyPage: React.FC = () => {
   const handleExecuteTransfer = async () => {
     if (!selectedAccount || !lookupResult || !amount) return;
     if (!authPassword) {
-      setSubmitError('Please enter your account password to authorize the transfer.');
+      setSubmitError('Please enter your dedicated transfer password to authorize the transfer.');
       return;
     }
 
@@ -235,16 +319,21 @@ export const SendMoneyPage: React.FC = () => {
       setReceipt(res);
       setStep(4);
     } catch (err: any) {
-      // Check for 3-failed password attempt account lockout
+      // Check for 3-failed transfer password attempt security hold (NO LOGOUT)
       if (
-        err?.status === 403 &&
-        (err?.message?.includes('INACTIVATED') || err?.message?.includes('3 consecutive') || err?.error === 'ACCOUNT_INACTIVATED_LOCKOUT')
+        (err?.status === 403 || err?.status === 401) &&
+        (err?.message?.includes('BLOCKED') ||
+          err?.message?.includes('3 consecutive') ||
+          err?.message?.includes('security hold') ||
+          err?.data?.detail?.error === 'TRANSFER_BLOCKED_SECURITY_HOLD' ||
+          err?.data?.detail?.error === 'TRANSFER_BLOCKED')
       ) {
-        setLockoutMessage(
+        setIsTransferBlocked(true);
+        setTransferBlockedMessage(
           err.message ||
-            'Security Alert: 3 consecutive incorrect password attempts detected. Your account has been inactivated and you have been logged out. An Administrator must review and reactivate your account in the Admin Control Center.'
+            'Security Alert: You have entered your transfer password incorrectly 3 times. Money movement has been placed on security hold. You remain logged in. Please contact Customer Support to verify your identity and restore transfer access.'
         );
-        setLockoutModalOpen(true);
+        setTransferBlockedModalOpen(true);
       } else if (err?.message?.includes('VPN') || err?.error === 'VPN_TRANSFER_BLOCKED') {
         setVpnDetails({
           isp: 'VPN / Datacenter Gateway',
@@ -258,12 +347,6 @@ export const SendMoneyPage: React.FC = () => {
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const handleAcknowledgeLockout = () => {
-    setLockoutModalOpen(false);
-    logout();
-    navigate('/login');
   };
 
   const handleCopyReceipt = () => {
@@ -317,6 +400,85 @@ export const SendMoneyPage: React.FC = () => {
           <span className={`px-2.5 py-1 rounded-full ${step >= 3 ? 'bg-[#3978F6] text-[#F4F7FC]' : 'bg-[#152238] text-[#71819A]'}`}>3</span>
         </div>
       </div>
+
+      {/* Transfer Blocked Alert Card */}
+      {isTransferBlocked && (
+        <div className="p-5 rounded-2xl bg-[#F06470]/10 border border-[#F06470]/40 space-y-3">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-[#F06470] shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <h3 className="text-sm font-bold text-[#F4F7FC]">
+                Transfer Capabilities Suspended (Security Hold)
+              </h3>
+              <p className="text-xs text-[#F4F7FC]/80 leading-relaxed">
+                Money transfers are temporarily disabled following 3 failed transfer password attempts. Your login session is secure, and you can still view balances, transactions, and download receipts.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => navigate('/customer/support?reason=TRANSFER_BLOCKED')}
+              className="px-4 py-2 rounded-xl bg-[#F06470] hover:bg-[#F06470]/90 text-[#F4F7FC] text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1.5"
+            >
+              <span>Contact Support &amp; Verify Identity</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/customer/dashboard')}
+              className="px-3.5 py-2 rounded-xl bg-[#152238] hover:bg-[#1B2B43] text-xs font-semibold text-[#A7B4C8] hover:text-[#F4F7FC] transition-colors"
+            >
+              Back to Dashboard
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Transfer Privileges Restored - Password Update Required Alert Card */}
+      {isPasswordChangeRequired && !isTransferBlocked && (
+        <div className="p-5 rounded-2xl bg-gradient-to-r from-cyan-950/80 via-[#101A2B] to-emerald-950/80 border border-cyan-500/50 space-y-3 shadow-lg">
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center shrink-0 border border-cyan-500/40">
+              <KeyRound className="w-4 h-4" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-[#F4F7FC]">
+                  Action Required: Set New Transfer Password
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/40">
+                  Send Money Disabled
+                </span>
+              </div>
+              <p className="text-xs text-[#F4F7FC]/80 leading-relaxed">
+                Compliance has verified your identity and restored transfer privileges. Sending money remains strictly disabled until you set your new transfer password.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setPasswordModalError(null);
+                setPasswordChangeModalOpen(true);
+              }}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 hover:opacity-90 text-slate-950 text-xs font-black transition-all shadow-md cursor-pointer flex items-center gap-1.5"
+            >
+              <Lock className="h-3.5 w-3.5 stroke-[2.5]" />
+              <span>Set New Transfer Password Now</span>
+              <ArrowRight className="h-3.5 w-3.5 stroke-[2.5]" />
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/customer/dashboard')}
+              className="px-3.5 py-2 rounded-xl bg-[#152238] hover:bg-[#1B2B43] text-xs font-semibold text-[#A7B4C8] hover:text-[#F4F7FC] transition-colors"
+            >
+              Back to Dashboard
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* STEP 1: Enter Recipient with Flag Selector or Omerta ID */}
       {step === 1 && (
@@ -503,21 +665,36 @@ export const SendMoneyPage: React.FC = () => {
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={() => handleLookup()}
-            disabled={isLookingUp || (inputMode === 'phone' ? !phoneInput.trim() : !omertaNumberInput.trim())}
-            className="w-full py-3.5 rounded-xl bg-[#3978F6] hover:bg-[#3978F6]/90 disabled:opacity-50 text-[#F4F7FC] text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 cursor-pointer"
-          >
-            {isLookingUp ? (
-              <span>Verifying Recipient Profile...</span>
-            ) : (
-              <>
-                <span>Verify Recipient &amp; Continue</span>
-                <ArrowRight className="h-4 w-4" />
-              </>
-            )}
-          </button>
+          {isPasswordChangeRequired ? (
+            <button
+              type="button"
+              onClick={() => {
+                setPasswordModalError(null);
+                setPasswordChangeModalOpen(true);
+              }}
+              className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 hover:opacity-95 text-slate-950 text-sm font-black transition-all flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/25 cursor-pointer"
+            >
+              <Lock className="h-4 w-4 stroke-[2.5]" />
+              <span>Set Transfer Password to Enable Send Money</span>
+              <ArrowRight className="h-4 w-4 stroke-[2.5]" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => handleLookup()}
+              disabled={isLookingUp || (inputMode === 'phone' ? !phoneInput.trim() : !omertaNumberInput.trim())}
+              className="w-full py-3.5 rounded-xl bg-[#3978F6] hover:bg-[#3978F6]/90 disabled:opacity-50 text-[#F4F7FC] text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 cursor-pointer"
+            >
+              {isLookingUp ? (
+                <span>Verifying Recipient Profile...</span>
+              ) : (
+                <>
+                  <span>Verify Recipient &amp; Continue</span>
+                  <ArrowRight className="h-4 w-4" />
+                </>
+              )}
+            </button>
+          )}
         </div>
       )}
 
@@ -729,7 +906,7 @@ export const SendMoneyPage: React.FC = () => {
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-[#A7B4C8] uppercase tracking-wider flex items-center gap-1.5">
                 <Lock className="w-3.5 h-3.5 text-[#29C5D9]" />
-                <span>Security Verification — Enter Account Password</span>
+                <span>Security Authorization — Enter Transfer Password</span>
               </label>
               <span className="text-[10px] text-[#29C5D9] font-semibold">Required</span>
             </div>
@@ -739,7 +916,7 @@ export const SendMoneyPage: React.FC = () => {
                 required
                 value={authPassword}
                 onChange={(e) => setAuthPassword(e.target.value)}
-                placeholder="Enter your account password to authorize transfer"
+                placeholder="Enter your dedicated transfer password"
                 className="w-full pl-3.5 pr-10 py-2.5 bg-[#101A2B] border border-[#25344A] rounded-xl text-xs text-[#F4F7FC] placeholder-[#71819A] focus:outline-none focus:border-[#27C58B]"
                 autoFocus
               />
@@ -748,11 +925,11 @@ export const SendMoneyPage: React.FC = () => {
                 onClick={() => setShowAuthPassword(!showAuthPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-[#71819A] hover:text-[#F4F7FC] cursor-pointer"
               >
-                {showAuthPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                {showAuthPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4 text-[#A7B4C8]" />}
               </button>
             </div>
             <p className="text-[10px] text-[#71819A]">
-              Warning: 3 consecutive incorrect attempts will permanently lock and inactivate your account until Administrator review.
+              Notice: 3 consecutive incorrect attempts will place transfers on security hold. You will remain logged in, but must contact Support to restore transfer capabilities.
             </p>
           </div>
 
@@ -935,46 +1112,151 @@ export const SendMoneyPage: React.FC = () => {
         </Modal>
       )}
 
-      {/* MODAL 2: 3-WRONG PASSWORD LOCKOUT & INACTIVATION MODAL */}
-      {lockoutModalOpen && (
+      {/* MODAL 2: 3-WRONG TRANSFER PASSWORD SECURITY HOLD MODAL (NON-LOGOUT) */}
+      {transferBlockedModalOpen && (
         <Modal
-          isOpen={lockoutModalOpen}
-          onClose={handleAcknowledgeLockout}
-          title="Account Inactivated & Session Terminated"
-          subtitle="Security Protocol Enforced (3 Failed Password Attempts)"
+          isOpen={transferBlockedModalOpen}
+          onClose={() => setTransferBlockedModalOpen(false)}
+          title="Transfer Access Suspended"
+          subtitle="Security Hold Enforced (3 Failed Password Attempts)"
           maxWidth="md"
         >
           <div className="space-y-4 text-xs">
-            <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-start gap-3">
-              <Lock className="w-5 h-5 shrink-0 text-rose-400 mt-0.5" />
+            <div className="p-4 rounded-xl bg-[#F06470]/10 border border-[#F06470]/30 text-[#F06470] flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 shrink-0 text-[#F06470] mt-0.5" />
               <div className="space-y-1">
-                <p className="font-bold text-white text-sm">Account Inactivated For Your Security</p>
-                <p className="text-rose-200/90 leading-relaxed">
-                  {lockoutMessage || 'You have entered your password incorrectly 3 times. Your account has been inactivated and your active login session has been terminated.'}
+                <p className="font-bold text-white text-sm">Money Transfers Restricted</p>
+                <p className="text-[#F06470]/90 leading-relaxed">
+                  {transferBlockedMessage || 'You have entered your transfer password incorrectly 3 times. Transfers have been placed on security hold for your protection. You remain logged in.'}
                 </p>
               </div>
             </div>
 
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2 text-slate-300">
-              <span className="text-[10px] font-bold text-slate-400 uppercase">How to Restore Access</span>
-              <ul className="list-disc pl-4 space-y-1 text-slate-300 text-[11px]">
-                <li>An Administrator or Compliance Officer must review the security flag in the Admin Control Center.</li>
-                <li>The Administrator will verify your identity by phone or registered email.</li>
-                <li>Once the risk is resolved and your account is reactivated, you will be able to log back in.</li>
+              <span className="text-[10px] font-bold text-slate-400 uppercase">How to Restore Transfer Privileges</span>
+              <ul className="list-disc pl-4 space-y-1.5 text-slate-300 text-[11px]">
+                <li>Open a support ticket and upload a picture of your National ID or Passport.</li>
+                <li>Compliance and audit staff will review and verify your identity in the Helpdesk queue.</li>
+                <li>Upon verification, you will be prompted to set a new transfer password.</li>
               </ul>
             </div>
 
-            <div className="flex items-center justify-end pt-2">
+            <div className="flex items-center justify-end gap-3 pt-2">
               <button
                 type="button"
-                onClick={handleAcknowledgeLockout}
-                className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold shadow-lg shadow-rose-600/30 cursor-pointer"
+                onClick={() => setTransferBlockedModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold cursor-pointer"
               >
-                <LogOut className="w-4 h-4" />
-                <span>Acknowledge &amp; Return to Login</span>
+                Dismiss
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTransferBlockedModalOpen(false);
+                  navigate('/customer/support?reason=TRANSFER_BLOCKED');
+                }}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#3978F6] hover:bg-[#3978F6]/90 text-white font-bold shadow-lg shadow-blue-500/25 cursor-pointer"
+              >
+                <span>Open Support Ticket</span>
+                <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           </div>
+        </Modal>
+      )}
+
+      {/* MODAL 3: RESTORE / SET NEW TRANSFER PASSWORD REQUIRED POPUP */}
+      {passwordChangeModalOpen && (
+        <Modal
+          isOpen={passwordChangeModalOpen}
+          onClose={() => setPasswordChangeModalOpen(false)}
+          title="Set New Transfer Password"
+          subtitle="Compliance Restoration: Please set a new transfer password to complete reactivation"
+          maxWidth="md"
+        >
+          <form onSubmit={handleChangeTransferPassword} className="space-y-4 text-xs">
+            {passwordModalSuccess ? (
+              <div className="p-4 rounded-xl bg-[#27C58B]/10 border border-[#27C58B]/30 text-[#27C58B] flex items-center gap-3">
+                <Check className="w-5 h-5 shrink-0 stroke-[3]" />
+                <div className="space-y-0.5">
+                  <p className="font-bold text-white text-sm">Transfer Password Updated Successfully!</p>
+                  <p className="text-xs text-[#27C58B]/90">
+                    Your transfer access is now ACTIVE. You can make money transfers freely.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <>
+                {passwordModalError && (
+                  <div className="p-3 rounded-xl bg-[#F06470]/10 border border-[#F06470]/30 text-xs text-[#F06470] flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{passwordModalError}</span>
+                  </div>
+                )}
+
+                <div className="p-3 rounded-xl bg-[#29C5D9]/10 border border-[#29C5D9]/30 text-[#29C5D9] flex items-start gap-2.5">
+                  <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" />
+                  <p className="text-[11px] leading-relaxed text-[#F4F7FC]">
+                    Your account ownership was verified by Compliance. Set your new dedicated transfer password below to authorize transfers.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-[#A7B4C8] mb-1">
+                    New Transfer Password (Min 8 Characters)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showNewPasswordText ? 'text' : 'password'}
+                      required
+                      value={newTransferPassword}
+                      onChange={(e) => setNewTransferPassword(e.target.value)}
+                      placeholder="Enter new transfer password"
+                      className="w-full pl-3 pr-9 py-2 bg-[#080D19] border border-[#25344A] rounded-xl text-xs text-[#F4F7FC] placeholder-[#71819A] focus:outline-none focus:border-[#29C5D9]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPasswordText(!showNewPasswordText)}
+                      className="absolute right-2.5 top-2.5 text-[#71819A] hover:text-[#F4F7FC]"
+                    >
+                      {showNewPasswordText ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5 text-[#A7B4C8]" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-[#A7B4C8] mb-1">
+                    Confirm New Transfer Password
+                  </label>
+                  <input
+                    type={showNewPasswordText ? 'text' : 'password'}
+                    required
+                    value={confirmTransferPassword}
+                    onChange={(e) => setConfirmTransferPassword(e.target.value)}
+                    placeholder="Repeat new transfer password"
+                    className="w-full px-3 py-2 bg-[#080D19] border border-[#25344A] rounded-xl text-xs text-[#F4F7FC] placeholder-[#71819A] focus:outline-none focus:border-[#29C5D9]"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-3">
+                  <button
+                    type="submit"
+                    disabled={passwordModalLoading}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#3978F6] hover:bg-[#3978F6]/90 disabled:opacity-50 text-white font-bold shadow-lg shadow-blue-500/25 cursor-pointer text-xs"
+                  >
+                    {passwordModalLoading ? (
+                      <span>Saving Password...</span>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4 text-[#29C5D9]" />
+                        <span>Save &amp; Reactivate Transfers</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </>
+            )}
+          </form>
         </Modal>
       )}
     </div>

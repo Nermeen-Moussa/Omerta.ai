@@ -20,6 +20,7 @@ import {
   UserCheck,
   Building,
   Bot,
+  LifeBuoy,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -45,12 +46,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
     { to: '/customer/accounts', label: 'My Accounts', icon: Wallet },
     { to: '/customer/transfer', label: 'Send Money', icon: Send },
     { to: '/customer/transactions', label: 'Transactions', icon: ArrowLeftRight },
+    { to: '/customer/support', label: 'Support & Chat', icon: LifeBuoy },
     { to: '/customer/security', label: 'Security & Devices', icon: ShieldCheck },
     { to: '/customer/profile', label: 'Profile', icon: UserCheck },
   ];
 
   const investigatorNavItems: NavItem[] = [
     { to: '/admin/investigations', label: 'Investigations', icon: FolderSearch },
+    { to: '/admin/support-cases', label: 'Support & Security Cases', icon: LifeBuoy },
     { to: '/admin/network-analysis', label: 'Network Graph Analysis', icon: Share2 },
     { to: '/admin/ai-assistant', label: 'AI Copilot & RAG', icon: Bot, badge: 'Coming Soon' },
     { to: '/admin/audit-logs', label: 'Audit Trail', icon: ScrollText },
@@ -60,12 +63,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
     { to: '/admin/dashboard', label: 'Analyst Overview', icon: LayoutDashboard },
     { to: '/admin/transactions', label: 'Transactions', icon: ArrowLeftRight },
     { to: '/admin/risk-monitoring', label: 'Risk Queue', icon: ShieldAlert, badge: '>40 Queue' },
+    { to: '/admin/support-cases', label: 'Support & Security Cases', icon: LifeBuoy },
     { to: '/admin/investigations', label: 'Investigations', icon: FolderSearch },
     { to: '/admin/reports', label: 'Reports', icon: FileBarChart },
     { to: '/admin/ai-assistant', label: 'AI Copilot & RAG', icon: Bot, badge: 'Coming Soon' },
   ];
 
   const auditorNavItems: NavItem[] = [
+    { to: '/admin/support-cases', label: 'Support & Security Cases', icon: LifeBuoy },
     { to: '/admin/audit-logs', label: 'Audit Logs', icon: ScrollText },
     { to: '/admin/reports', label: 'Compliance Reports', icon: FileBarChart },
     { to: '/admin/transactions', label: 'Transactions (Read-Only)', icon: ArrowLeftRight },
@@ -74,6 +79,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
 
   const adminNavItems: NavItem[] = [
     { to: '/admin/dashboard', label: 'Overview', icon: LayoutDashboard },
+    { to: '/admin/support-cases', label: 'Support & Security Cases', icon: LifeBuoy },
     { to: '/admin/transactions', label: 'Transactions', icon: ArrowLeftRight },
     { to: '/admin/risk-monitoring', label: 'Risk Monitoring', icon: ShieldAlert, badge: '>40 Queue' },
     { to: '/admin/investigations', label: 'Investigations', icon: FolderSearch },
@@ -87,6 +93,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
     { to: '/admin/ai-assistant', label: 'AI Copilot & RAG', icon: Bot, badge: 'Coming Soon' },
     { to: '/admin/settings', label: 'Settings', icon: Settings },
   ];
+
 
   let navItems: NavItem[] = customerNavItems;
   if (role === 'ADMINISTRATOR' || role === 'SUB_ADMINISTRATOR') {

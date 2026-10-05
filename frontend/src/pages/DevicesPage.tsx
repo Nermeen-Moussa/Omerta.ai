@@ -183,17 +183,25 @@ export const DevicesPage: React.FC = () => {
                     </td>
                     <td className="py-3 px-4 font-medium text-slate-900 dark:text-white">{d.platform}</td>
                     <td className="py-3 px-4">
-                      {d.is_emulator || d.is_rooted ? (
-                        <span className="inline-flex items-center gap-1 text-rose-700 dark:text-rose-400 font-bold text-[11px]">
-                          <AlertTriangle className="h-3.5 w-3.5" />
-                          {d.is_emulator ? 'EMULATOR DETECTED' : 'ROOTED CLIENT'}
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-semibold text-[11px]">
-                          <CheckCircle className="h-3.5 w-3.5" />
-                          Standard Hardware
-                        </span>
-                      )}
+                      <div className="flex flex-col gap-1">
+                        {d.account_count && d.account_count > 1 ? (
+                          <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-bold text-[11px] bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800/60 w-fit">
+                            <AlertTriangle className="h-3 w-3 shrink-0" />
+                            MULTI-ACCOUNT ({d.account_count} ACCOUNTS)
+                          </span>
+                        ) : null}
+                        {d.is_emulator || d.is_rooted ? (
+                          <span className="inline-flex items-center gap-1 text-rose-700 dark:text-rose-400 font-bold text-[11px]">
+                            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                            {d.is_emulator ? 'EMULATOR DETECTED' : 'ROOTED CLIENT'}
+                          </span>
+                        ) : (!d.account_count || d.account_count <= 1) ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-semibold text-[11px]">
+                            <CheckCircle className="h-3.5 w-3.5 shrink-0" />
+                            Standard Hardware
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="py-3 px-4 font-mono font-bold text-sky-700 dark:text-cyan-300">{d.session_count} sessions</td>
                     <td className="py-3 px-4">

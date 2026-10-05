@@ -14,6 +14,7 @@ interface AuthContextType {
   register: (data: any) => Promise<any>;
   logout: () => void;
   switchDemoRole: (role: UserRole) => Promise<void>;
+  refreshCustomerProfile: () => Promise<CustomerProfile | null>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -201,6 +202,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const refreshCustomerProfile = async (): Promise<CustomerProfile | null> => {
+    if (!token || user?.role !== 'CUSTOMER') return null;
+    try {
+      const p = await api.getCustomerProfile();
+      if (p) {
+        setCustomer(p);
+        return p;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
   const logout = () => {
     setUser(null);
     setCustomer(null);
@@ -223,6 +238,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         register,
         logout,
         switchDemoRole,
+        refreshCustomerProfile,
       }}
     >
       {children}
