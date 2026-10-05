@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root,
+  :root[data-theme="dark"],
+  :root[data-theme="light"],
+  .dark,
+  .light {
+    /* Primary Dark Theme Design Tokens (Fintech Intelligence Aesthetic) */
+    --bg-primary: #080D19;
+    --bg-sidebar: #0B1220;
+    --bg-content: #101A2B;
+    --bg-card: #101A2B;
+    --bg-hover: #152238;
+    --border-subtle: #1E2D4A;
+    --border-card: #25344A;
+    --border-glow: #3978F6;
+    --brand-blue: #3978F6;
+    --brand-cyan: #29C5D9;
+    --text-primary: #F4F7FC;
+    --text-secondary: #A7B4C8;
+    --text-muted: #71819A;
+    --status-success: #27C58B;
+    --status-warning: #F4B942;
+    --status-danger: #F06470;
+    --status-info: #60A5FA;
+    --risk-low: #27C58B;
+    --risk-moderate: #60A5FA;
+    --risk-review: #F4B942;
+    --risk-high: #F97316;
+    --risk-critical: #F06470;
+    --card-bg: #101A2B;
+    --card-glow-bg: linear-gradient(180deg, #152238 0%, #101A2B 100%);
+    --card-border: #25344A;
+    --card-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.4);
+    --scrollbar-track: #080D19;
+    --scrollbar-thumb: #25344A;
+  }
+
+  body {
+    background-color: #080D19 !important;
+    color: #F4F7FC !important;
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "tnum";
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+}
+
+/* Custom modern scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Glass & Card Utilities */
+.omerta-card {
+  background-color: #101A2B !important;
+  border: 1px solid #25344A !important;
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.4);
+  color: #F4F7FC !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.omerta-card-glow {
+  background: linear-gradient(180deg, #152238 0%, #101A2B 100%) !important;
+  border: 1px solid rgba(57, 120, 246, 0.4) !important;
+  border-radius: 0.75rem;
+  box-shadow: 0 0 25px -5px rgba(41, 197, 217, 0.15);
+  color: #F4F7FC !important;
+}
+
+.omerta-gradient-text {
+  background: linear-gradient(135deg, #F4F7FC 0%, #3978F6 60%, #29C5D9 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Responsive Table Styles */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+thead th {
+  background-color: #101A2B !important;
+  color: #A7B4C8 !important;
+  font-weight: 700;
+  border-bottom: 1px solid #25344A !important;
+}
+
+tbody tr {
+  border-bottom: 1px solid rgba(37, 52, 74, 0.7) !important;
+  color: #F4F7FC !important;
+}
+
+tbody tr:hover {
+  background-color: rgba(27, 43, 67, 0.6) !important;
+}
+
+/* Tabular numerals for financial values */
+.font-tabular {
+  font-variant-numeric: tabular-nums;
+}

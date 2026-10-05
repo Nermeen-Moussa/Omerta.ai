@@ -16,7 +16,7 @@ from infrastructure.database.models import (
     InvestigationCase,
     Transaction,
 )
-from infrastructure.database.seed import EVIDENCE, seed
+from infrastructure.database.seed import seed
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 

@@ -27,6 +27,9 @@ from apps.api.schemas import (
 )
 from apps.investigator.state import InvestigationRunRequest
 
+from fastapi.middleware.cors import CORSMiddleware
+from apps.api.v1 import api_v1_router
+
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -34,6 +37,18 @@ app = FastAPI(
     version="0.1.0",
     description="Agentic AI financial-crime investigation platform",
 )
+
+# CORS Middleware for modern frontend integration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Mount v1 REST API routes
+app.include_router(api_v1_router)
 
 # --------------------------------------------------------------------------- #
 # Security middleware (Phase 17): API-key auth + rate limiting.
@@ -50,8 +65,13 @@ async def security_middleware(request, call_next):
     from infrastructure.security.ratelimit import get_limiter
 
     path = request.url.path
-    # Static dashboard and health probes stay open.
-    if path in _OPEN_PATHS or path.startswith("/static") or path.startswith("/health"):
+    # Static dashboard, health probes, and v1 endpoints stay open to bearer auth
+    if (
+        path in _OPEN_PATHS
+        or path.startswith("/static")
+        or path.startswith("/health")
+        or path.startswith("/api/v1")
+    ):
         return await call_next(request)
 
     if auth_enabled():

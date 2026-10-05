@@ -15,12 +15,48 @@ regulatory actions (account freezing, SAR submission, rule changes).
 | Language | Python 3.12 |
 | Package management | uv |
 | API | FastAPI |
+| Frontend | React 18 + TypeScript + Vite + Tailwind CSS |
 | Orchestration | LangGraph |
 | Tool interface | MCP (Model Context Protocol) |
-| OLTP database | PostgreSQL (SQLAlchemy async + asyncpg) |
-| Graph database | Neo4j |
+| OLTP database | PostgreSQL 16 (SQLAlchemy 2.0 async + asyncpg) |
+| Graph database | Neo4j 5.26 (Bolt interface) |
 | Validation | Pydantic v2 |
 | Tests / lint | pytest, ruff |
+
+---
+
+## 🗄️ Database Architecture & Connection Details
+
+Omerta.ai operates with two complementary persistence engines:
+
+1. **Primary OLTP & Ledger Store (PostgreSQL 16)**
+   - **Engine:** PostgreSQL 16
+   - **Host & Port:** `localhost:15432` (Docker service `omerta-postgres`)
+   - **Database Name:** `omerta_db`
+   - **User / Password:** `omerta_user` / `omerta_secret_password_2026`
+   - **Async Connection String:** `postgresql+asyncpg://omerta_user:omerta_secret_password_2026@localhost:15432/omerta_db`
+   - **Driver & Framework:** SQLAlchemy 2.0 Async Session + `asyncpg` high-performance async driver
+   - **Stored Entities:** Users, Banking Customers, Multi-Currency Checking/Savings Accounts, Immutable Double-Entry Ledger Entries (`account_ledger_entries`), P2P Transfers, Devices, IP Telemetry, Active Sessions, and Audit Events.
+
+2. **Financial Crime Knowledge Graph (Neo4j 5.26)**
+   - **Host & Port:** `localhost:17687` (Bolt), `localhost:17474` (Browser UI)
+   - **Stored Entities:** Customer nodes, Account nodes, Device nodes, IP nodes, and Transaction flow edges (`TRANSFERRED_TO`, `USED_DEVICE`, `ORIGINATED_FROM`).
+
+---
+
+## 🔑 2. Master Credentials & Accounts Reference Sheet
+
+| Role | Persona Name | Login Email / Username | Password | Account / Identifier | Initial Balance |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`ADMINISTRATOR`** | **Dr. Sarah Al-Rashid** | `admin@omerta.ai` / `admin` | `AdminPass123!` | System Super Admin | Platform Oversight |
+| **`FRAUD_ANALYST`** | **Tariq Mansour** | `analyst@omerta.ai` / `analyst` | `AnalystPass123!` | Operations Sub-Admin | Case Operations |
+| **`INVESTIGATOR`** | **Laila El-Kady** | `investigator@omerta.ai` / `investigator` | `InvestigatorPass123!` | Senior Investigator | SAR Dispositions |
+| **`COMPLIANCE_AUDITOR`** | **Omar Farooq** | `auditor@omerta.ai` / `auditor` | `AuditorPass123!` | Regulatory Sub-Admin | Audit & Telemetry |
+| **`CUSTOMER`** | **Ziad Karim** | `ziad@omerta.ai` / `ziad_k` | `Customer@2026!` | `OMR-1092-4821` (`+20 10 1111 2222`) | `50,000.00 EGP` |
+| **`CUSTOMER`** | **Layla Hassan** | `layla@omerta.ai` / `layla_h` | `Customer@2026!` | `OMR-3847-1920` (`+20 10 2222 3333`) | `25,000.00 EGP` |
+| **`CUSTOMER`** | **Amira El-Sayed** | `amira@omerta.ai` / `amira_e` | `Customer@2026!` | `OMR-7193-8402` (`+20 10 3333 4444`) | `100,000.00 EGP` |
+
+---
 
 ## Project structure
 
@@ -768,3 +804,66 @@ Phase 16 (frontend investigation dashboard - static SPA on the Case API),
 Phase 17 (security hardening: opt-in API-key auth with roles, rate limiting,
 input hardening, tamper evidence), and Phase 18 (deployment, health checks,
 Docker backend, documentation). Remaining: none - see the final report.
+
+
+
+
+
+
+
+
+
+---
+
+## 2. Master Credentials & Accounts Reference Sheet
+
+| Role | Persona Name | Login Email / Username | Password | Account / Identifier | Initial Balance |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **ADMINISTRATOR** | Dr. Sarah Al-Rashid | `admin@omerta.ai` / `admin` | `AdminPass123!` | System Super Admin | Platform Oversight |
+| **FRAUD_ANALYST** | Tariq Mansour | `analyst@omerta.ai` / `analyst` | `AnalystPass123!` | Operations Sub-Admin | Case Operations |
+| **INVESTIGATOR** | Laila El-Kady | `investigator@omerta.ai` / `investigator` | `InvestigatorPass123!` | Senior Investigator | SAR Dispositions |
+| **COMPLIANCE_AUDITOR** | Omar Farooq | `auditor@omerta.ai` / `auditor` | `AuditorPass123!` | Regulatory Sub-Admin | Audit & Telemetry |
+| **CUSTOMER** | Ziad Karim | `ziad@omerta.ai` / `ziad_k` | `Customer@2026!` | `OMR-1092-4821` (+20 10 1111 2222) | 50,000.00 EGP |
+| **CUSTOMER** | Layla Hassan | `layla@omerta.ai` / `layla_h` | `Customer@2026!` | `OMR-3847-1920` (+20 10 2222 3333) | 25,000.00 EGP |
+| **CUSTOMER** | Amira El-Sayed | `amira@omerta.ai` / `amira_e` | `Customer@2026!` | `OMR-7193-8402` (+20 10 3333 4444) | 100,000.00 EGP |
+
+### Administrative Hierarchy & Staff Governance Rules
+1. **Root Super Administrator Immutability (`admin` / `admin@omerta.ai`):**
+   - The Root Super Administrator is permanently protected at the engine level (`HTTP 403 SUPER_ADMIN_PROTECTED`).
+   - Co-administrators and operational staff **CANNOT** delete, suspend, or revoke the Root Super Admin.
+   - Self-deletion is strictly prevented across all administrative sessions (`HTTP 400 SELF_DELETION_PROHIBITED`).
+2. **Staff Provisioning Authority:**
+   - Super Admin and Co-Admins can create operational accounts: **Co-Administrators (`ADMINISTRATOR`)**, **Fraud Analysts (`FRAUD_ANALYST`)**, **Investigators (`SENIOR_INVESTIGATOR`)**, and **Compliance Auditors (`AUDITOR`)** with full credential sets (name, username, email, password, and fine-grained granular permissions).
+3. **Strict Prohibition on Customer Creation via Admin Staff Portal:**
+   - Creating `CUSTOMER` accounts through the staff management portal is strictly blocked (`HTTP 400 INVALID_STAFF_ROLE`). Customers must register through the standard KYC public registration workflow.
+4. **Admin VPN Security Auto-Lockout & Auto-Unlock:**
+   - Any administrator connecting through a commercial VPN or proxy is instantly locked out (`HTTP 403 ADMIN_VPN_SECURITY_LOCK`) to protect platform integrity.
+   - Connecting from a clean, verified non-VPN IP automatically unlocks the account and restores full privileges.
+
+---
+
+## 3. Active Database Architecture
+
+The platform operates on a production-grade dual database architecture:
+
+### 1. Primary OLTP & Financial Ledger: PostgreSQL 16
+- **Database Engine:** PostgreSQL 16 running via Docker container (`omerta-postgres`)
+- **Connection URI:** `postgresql+asyncpg://omerta_user:omerta_secret_password_2026@localhost:15432/omerta_db`
+- **Port:** `15432` (Host) $\rightarrow$ `5432` (Container)
+- **Schema & Responsibilities:**
+  - `users`: Authentication identities, password hashes, multi-factor metadata, and platform roles (`ADMINISTRATOR`, `FRAUD_ANALYST`, `SENIOR_INVESTIGATOR`, `COMPLIANCE_AUDITOR`, `CUSTOMER`).
+  - `customers` & `accounts`: Customer profiles, KYC tiers, account balances (stored in cents with currency support: EGP, USD, EUR, GBP), and risk scores.
+  - `transactions`: Double-entry ledger records with atomic database row locks (`SELECT ... FOR UPDATE`) and concurrency semaphores.
+  - `sessions` & `devices`: Client device telemetry, IP tracking, VPN detection, and single-active-session constraints.
+  - `audit_events`: Durable, append-only compliance timeline tracking all authentication, transaction, and investigation actions.
+  - `investigation_cases` & `case_dispositions`: Financial crime case files, evidence provenance, and analyst SAR dispositions.
+
+### 2. Graph Database: Neo4j 5.26
+- **Database Engine:** Neo4j 5.26 Community Edition running via Docker container (`omerta-neo4j`)
+- **Connection URI:** `bolt://localhost:17687` (Authentication: `neo4j` / `omerta_graph_password_2026`)
+- **Web Browser UI:** `http://localhost:17474`
+- **Schema & Responsibilities:**
+  - Nodes: `(:Customer)`, `(:Account)`, `(:Device)`, `(:IPAddress)`, `(:Merchant)`.
+  - Edges: `[:TRANSFERRED_TO]`, `[:USED_DEVICE]`, `[:ACCESSED_FROM_IP]`, `[:LINKED_TO]`.
+  - Used for: Real-time mule network detection, cyclic layering ring analysis, shared device fraud rings, and visual graph analytics.
+
