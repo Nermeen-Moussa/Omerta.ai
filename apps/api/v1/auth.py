@@ -6,6 +6,7 @@ and authenticated user payload resolution.
 """
 
 from decimal import Decimal
+import secrets
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -83,8 +84,11 @@ class RegisterRequest(BaseModel):
     full_name: str = Field(..., min_length=2, max_length=100)
     email: str = Field(..., min_length=5, max_length=120)
     username: str = Field(..., min_length=3, max_length=30)
-    password: str = Field(..., min_length=8)
+    password: str = Field(..., min_length=8, description="Account Password for login/logout")
     confirm_password: str = Field(..., min_length=8)
+    transfer_password: str | None = Field(default=None, description="Transfer Password strictly for authorizing money transfers")
+    confirm_transfer_password: str | None = Field(default=None)
+    national_id_number: str | None = Field(default=None, description="National Identification Number")
     phone: str = Field(default="", max_length=35)
     country: str = Field(default="EG", min_length=2, max_length=2)
     preferred_currency: str = Field(default="EGP", min_length=3, max_length=3)
@@ -143,12 +147,37 @@ class AuthResponse(BaseModel):
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 async def register(body: RegisterRequest, request: Request) -> AuthResponse:
-    """Register a new customer, provision a demo account with opening balance, and issue a JWT token."""
+    """Register a new customer with distinct account and transfer passwords, National ID, and opening balance."""
+    # 1. Validate Account Password confirmation
     if body.password != body.confirm_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "PASSWORD_MISMATCH", "message": "Password and confirmation do not match."},
+            detail={"error": "PASSWORD_MISMATCH", "message": "Account password and confirmation do not match."},
         )
+
+    # 2. Validate Transfer Password confirmation & Separation if provided
+    effective_transfer_password = body.transfer_password
+    if effective_transfer_password is not None:
+        if body.confirm_transfer_password and effective_transfer_password != body.confirm_transfer_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"error": "TRANSFER_PASSWORD_MISMATCH", "message": "Transfer password and confirmation do not match."},
+            )
+
+        # 3. Strictly Enforce Password Separation (Account Password != Transfer Password)
+        if body.password == effective_transfer_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": "TRANSFER_PASSWORD_CANNOT_MATCH_ACCOUNT_PASSWORD",
+                    "message": "For your financial security, your Transfer Password must be completely different from your Account Login Password.",
+                },
+            )
+    else:
+        # Generate random distinct transfer password for legacy payloads
+        effective_transfer_password = f"TxPass_{secrets.token_hex(4)}!"
+
+    effective_nat_id = body.national_id_number or f"2900101{secrets.randbelow(8999999) + 1000000}"
 
     user_agent = request.headers.get("user-agent", "Mozilla/5.0 (X11; Linux x86_64)")
     forwarded = request.headers.get("cf-connecting-ip") or request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for")
@@ -173,6 +202,8 @@ async def register(body: RegisterRequest, request: Request) -> AuthResponse:
                 email=body.email,
                 username=body.username,
                 password=body.password,
+                transfer_password=effective_transfer_password,
+                national_id_number=effective_nat_id,
                 phone=body.phone,
                 country=body.country,
                 preferred_currency=body.preferred_currency,
@@ -531,6 +562,8 @@ async def get_me(current_user: dict[str, Any] = Depends(get_current_user)) -> di
                 "preferred_currency": user.customer.preferred_currency,
                 "device_consent": user.customer.device_consent,
                 "status": user.customer.status,
+                "transfer_status": getattr(user.customer, "transfer_status", "ACTIVE"),
+                "identity_status": getattr(user.customer, "identity_status", "NOT_VERIFIED"),
             }
 
         role = current_user.get("role", "CUSTOMER")
@@ -542,6 +575,7 @@ async def get_me(current_user: dict[str, Any] = Depends(get_current_user)) -> di
                 "username": current_user.get("username"),
                 "full_name": current_user.get("full_name"),
                 "role": role,
+                "is_active": user.is_active if user else True,
             },
             "customer": customer_data,
             "permissions": {

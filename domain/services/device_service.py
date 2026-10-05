@@ -37,7 +37,10 @@ class DeviceService:
         page_size: int = 25,
     ) -> dict[str, Any]:
         """Paginated list of pseudonymous devices."""
-        query = select(Device).options(selectinload(Device.sessions))
+        query = select(Device).options(
+            selectinload(Device.sessions).selectinload(Session.account),
+            selectinload(Device.sessions).selectinload(Session.customer).selectinload(Customer.accounts),
+        )
 
         conditions = []
         if search:
@@ -67,12 +70,27 @@ class DeviceService:
         total = await self.session.scalar(count_q) or 0
 
         offset = (max(1, page) - 1) * page_size
-        query = query.order_by(Device.id).offset(offset).limit(page_size)
+        query = query.order_by(Device.id.desc()).offset(offset).limit(page_size)
 
         devices = (await self.session.scalars(query)).all()
 
         items = []
         for d in devices:
+            unique_accs = {s.account.external_id for s in d.sessions if s.account}
+            for s in d.sessions:
+                if s.customer and getattr(s.customer, "accounts", None):
+                    for acc in s.customer.accounts:
+                        unique_accs.add(acc.external_id)
+                elif s.user_id:
+                    unique_accs.add(f"USER-{s.user_id}")
+            acc_count = len(unique_accs)
+            
+            calculated_risk = d.risk_level or "LOW"
+            if acc_count >= 3:
+                calculated_risk = "CRITICAL"
+            elif acc_count >= 2 or d.is_emulator or d.is_rooted:
+                calculated_risk = "HIGH"
+
             items.append({
                 "id": d.id,
                 "external_id": d.external_id,
@@ -81,8 +99,10 @@ class DeviceService:
                 "user_agent": d.user_agent,
                 "is_emulator": d.is_emulator,
                 "is_rooted": d.is_rooted,
-                "risk_level": d.risk_level,
+                "risk_level": calculated_risk,
                 "session_count": len(d.sessions),
+                "account_count": acc_count,
+                "is_shared": acc_count > 1,
                 "first_seen_at": d.first_seen_at.isoformat(),
                 "last_seen_at": d.last_seen_at.isoformat(),
             })
@@ -99,7 +119,7 @@ class DeviceService:
         """Fetch detail view of a device and associated accounts & transactions."""
         query = select(Device).options(
             selectinload(Device.sessions).selectinload(Session.account),
-            selectinload(Device.sessions).selectinload(Session.customer),
+            selectinload(Device.sessions).selectinload(Session.customer).selectinload(Customer.accounts),
             selectinload(Device.sessions).selectinload(Session.ip_address),
         )
 
@@ -123,6 +143,22 @@ class DeviceService:
                     "currency": s.account.currency,
                     "risk_level": s.account.risk_level,
                 }
+            elif s.customer and getattr(s.customer, "accounts", None):
+                for acc in s.customer.accounts:
+                    if acc.external_id not in associated_accounts:
+                        associated_accounts[acc.external_id] = {
+                            "id": acc.id,
+                            "external_id": acc.external_id,
+                            "customer_name": acc.customer_name or s.customer.name,
+                            "currency": acc.currency,
+                            "risk_level": acc.risk_level,
+                        }
+
+        calc_risk = device.risk_level or "LOW"
+        if len(associated_accounts) >= 3:
+            calc_risk = "CRITICAL"
+        elif len(associated_accounts) >= 2 or device.is_emulator or device.is_rooted:
+            calc_risk = "HIGH"
 
         # Fetch recent transactions on this device
         txns_q = (
@@ -142,7 +178,7 @@ class DeviceService:
                 "user_agent": device.user_agent,
                 "is_emulator": device.is_emulator,
                 "is_rooted": device.is_rooted,
-                "risk_level": device.risk_level,
+                "risk_level": calc_risk,
                 "first_seen_at": device.first_seen_at.isoformat(),
                 "last_seen_at": device.last_seen_at.isoformat(),
             },

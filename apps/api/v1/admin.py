@@ -22,8 +22,10 @@ from infrastructure.database.models import (
     Alert,
     AuditEvent,
     Customer,
+    IdentityVerification,
     InvestigationCase,
     RiskAssessment,
+    SupportTicket,
     Transaction,
     User,
 )
@@ -530,7 +532,6 @@ async def list_problem_customers(
 ) -> list[dict[str, Any]]:
     """List high-risk, locked, or flagged customers requiring administrative review and direct communication."""
     from apps.api.v1.customer import FAILED_TRANSFER_ATTEMPTS
-    import secrets
 
     async with AsyncSession(get_engine(), expire_on_commit=False) as session:
         stmt = (
@@ -541,6 +542,9 @@ async def list_problem_customers(
                 (Customer.risk_level.in_(["HIGH", "CRITICAL"]))
                 | (Customer.status.in_(["SUSPENDED", "LOCKED"]))
                 | (User.is_active.is_(False))
+                | (Customer.transfer_status == "BLOCKED")
+                | (Customer.transfer_failed_attempts >= 3)
+                | (Customer.identity_status.in_(["PENDING_REVIEW", "PENDING", "REJECTED"]))
             )
             .order_by(Customer.updated_at.desc())
         )
@@ -550,6 +554,18 @@ async def list_problem_customers(
         for c in customers:
             user = c.user
             failed_attempts = FAILED_TRANSFER_ATTEMPTS.get(user.id, 0) if user else 0
+            if getattr(c, "transfer_failed_attempts", 0) > failed_attempts:
+                failed_attempts = c.transfer_failed_attempts
+
+            # Find latest support ticket if any
+            ticket_stmt = (
+                select(SupportTicket)
+                .options(selectinload(SupportTicket.identity_verifications))
+                .where(SupportTicket.customer_id == c.id)
+                .order_by(SupportTicket.updated_at.desc())
+                .limit(1)
+            )
+            latest_ticket = await session.scalar(ticket_stmt)
 
             # Find recent security audit events
             recent_evts_stmt = (
@@ -579,9 +595,15 @@ async def list_problem_customers(
                 for acc in (c.accounts or [])
             )
 
+            is_transfer_blocked = (c.transfer_status == "BLOCKED") or (failed_attempts >= 3)
+
             # Determine lock/flag primary reason based on real security telemetry
-            if failed_attempts >= 3 or (user and not user.is_active and any(e.event_type == "EXCESSIVE_PASSWORD_FAILURES" for e in evts)):
-                primary_reason = f"Locked: 3 Failed Password Attempts (Account Inactivated)"
+            if is_transfer_blocked:
+                primary_reason = "Transfer Password Blocked (3 Failed Attempts) — Requires Identity Verification"
+            elif c.identity_status == "PENDING_REVIEW":
+                primary_reason = "National ID Document Uploaded — Pending Compliance Review"
+            elif failed_attempts >= 3 or (user and not user.is_active and any(e.event_type == "EXCESSIVE_PASSWORD_FAILURES" for e in evts)):
+                primary_reason = "Locked: 3 Failed Password Attempts (Account Inactivated)"
             elif any(e.event_type == "IMPOSSIBLE_TRAVEL_VELOCITY" for e in evts):
                 primary_reason = "Flagged: Impossible Travel Velocity Anomaly"
             elif any(e.event_type == "VPN_TRANSFER_BLOCKED" for e in evts):
@@ -595,6 +617,10 @@ async def list_problem_customers(
             else:
                 primary_reason = "Elevated Risk Rating"
 
+            has_uploaded_id = False
+            if latest_ticket and latest_ticket.identity_verifications:
+                has_uploaded_id = any(bool(v.document_front_url) for v in latest_ticket.identity_verifications)
+
             results.append({
                 "customer_id": c.external_id,
                 "user_id": user.external_id if user else None,
@@ -606,11 +632,22 @@ async def list_problem_customers(
                 "risk_level": c.risk_level,
                 "status": c.status,
                 "primary_reason": primary_reason,
+                "customer_issue": latest_ticket.subject if latest_ticket else primary_reason,
+                "transfer_status": getattr(c, "transfer_status", "ACTIVE"),
+                "transfer_blocked": is_transfer_blocked,
                 "failed_password_attempts": failed_attempts,
+                "identity_status": getattr(c, "identity_status", "NOT_VERIFIED"),
+                "national_id_number": getattr(c, "national_id_number", None),
+                "ticket_number": latest_ticket.external_id if latest_ticket else None,
+                "ticket_id": latest_ticket.id if latest_ticket else None,
+                "ticket_subject": latest_ticket.subject if latest_ticket else None,
+                "ticket_issue_type": latest_ticket.issue_type if latest_ticket else None,
+                "ticket_status": latest_ticket.status if latest_ticket else None,
+                "has_uploaded_id": has_uploaded_id,
                 "is_user_active": user.is_active if user else False,
                 "total_balance_egp": total_balance,
                 "recent_audit_events": evt_list,
-                "actions_available": ["CALL_CUSTOMER", "SEND_EMAIL", "RESOLVE_RISK", "AGENTIC_REPORT", "VIEW_PROFILE"],
+                "actions_available": ["SUPPORT_CHAT", "CALL_CUSTOMER", "SEND_EMAIL", "RESOLVE_RISK", "AGENTIC_REPORT", "VIEW_PROFILE"],
             })
 
         return results

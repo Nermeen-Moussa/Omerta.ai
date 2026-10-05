@@ -102,7 +102,7 @@ async def test_transfer_password_verification_and_3_strike_risk_lock(seeded_db):
         assert res_fail2.status_code == 401
         assert "Attempt 2 of 3" in res_fail2.json()["detail"]["message"]
 
-        # 3rd Failed attempt -> 403 Forbidden with ACCOUNT_INACTIVATED_LOCKOUT
+        # 3rd Failed attempt -> 403 Forbidden with TRANSFER_BLOCKED_SECURITY_HOLD
         res_fail3 = await client.post(
             "/api/v1/customer/transfers",
             json={
@@ -115,40 +115,25 @@ async def test_transfer_password_verification_and_3_strike_risk_lock(seeded_db):
             headers=headers,
         )
         assert res_fail3.status_code == 403
-        assert res_fail3.json()["detail"]["error"] == "ACCOUNT_INACTIVATED_LOCKOUT"
-        assert "INACTIVATED" in res_fail3.json()["detail"]["message"]
+        assert res_fail3.json()["detail"]["error"] == "TRANSFER_BLOCKED_SECURITY_HOLD"
+        assert "blocked" in res_fail3.json()["detail"]["message"].lower()
 
-        # 4. Attempting to log in as Ziad is now BLOCKED with 403 ACCOUNT_INACTIVE_LOCKED
-        res_login_blocked = await client.post(
+        # 4. User session remains ACTIVE (NOT logged out) and User can view dashboard
+        res_me = await client.get("/api/v1/auth/me", headers=headers)
+        assert res_me.status_code == 200
+        assert res_me.json()["user"]["is_active"] is True
+
+        res_dash = await client.get("/api/v1/customer/dashboard", headers=headers)
+        assert res_dash.status_code == 200
+        assert res_dash.json()["customer"]["transfer_status"] == "BLOCKED"
+
+        # 5. Customer can still login normally (Account is accessible)
+        res_login_ok = await client.post(
             "/api/v1/auth/login",
             json={"username": "ziad@omerta.ai", "password": "Customer@2026!", "is_vpn": False},
         )
-        assert res_login_blocked.status_code == 403
-        assert res_login_blocked.json()["detail"]["error"] == "ACCOUNT_INACTIVE_LOCKED"
-
-        # 5. Administrator logs in and resolves Ziad's risk in Admin Control Center
-        res_admin = await client.post(
-            "/api/v1/auth/login",
-            json={"username": "admin@omerta.ai", "password": "AdminPass123!", "is_vpn": False},
-        )
-        admin_headers = {"Authorization": f"Bearer {res_admin.json()['access_token']}"}
-
-        # Resolve risk for customer
-        res_resolve = await client.post(
-            "/api/v1/admin/problem-customers/CUST-1001/resolve-risk",
-            json={"reason": "Customer identity verified by telephone; account reactivated.", "reset_risk_to": "LOW"},
-            headers=admin_headers,
-        )
-        assert res_resolve.status_code == 200
-        assert res_resolve.json()["success"] is True
-
-        # 6. Ziad CAN NOW LOG IN SUCCESSFULLY!
-        res_login_success = await client.post(
-            "/api/v1/auth/login",
-            json={"username": "ziad@omerta.ai", "password": "Customer@2026!", "is_vpn": False},
-        )
-        assert res_login_success.status_code == 200
-        assert res_login_success.json()["user"]["username"] == "ziad@omerta.ai"
+        assert res_login_ok.status_code == 200
+        assert res_login_ok.json()["user"]["username"] == "ziad@omerta.ai"
 
 
 @pytest.mark.asyncio

@@ -19,10 +19,11 @@ from sqlalchemy.orm import selectinload
 
 from apps.api.v1.auth import evaluate_vpn_risk
 from domain.services.customer_service import CustomerService
+from domain.services.ticket_service import TicketService
 from domain.services.transfer_service import TransferError, TransferService
 from infrastructure.database.models import Alert, AuditEvent, Session as UserSession, User
 from infrastructure.database.session import get_engine
-from infrastructure.security.jwt_auth import get_current_user, verify_password
+from infrastructure.security.jwt_auth import get_current_user, hash_password, verify_password
 
 router = APIRouter(prefix="/customer", tags=["Customer Banking Platform"])
 
@@ -189,76 +190,88 @@ async def initiate_transfer(
                 detail={"error": "NOT_A_CUSTOMER", "message": "Only registered customers can send transfers."},
             )
 
-        # 1. Enforce password authorization with 3-attempt failure risk escalation
+        # 0. Enforce Transfer Block Check
+        if getattr(customer, "transfer_status", "ACTIVE") == "BLOCKED":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "TRANSFER_BLOCKED_SECURITY_HOLD",
+                    "transfer_status": "BLOCKED",
+                    "failed_attempts": customer.transfer_failed_attempts or 3,
+                    "message": "Your transfer services have been temporarily blocked after multiple unsuccessful transfer-password attempts. Your account remains accessible, but sending and receiving funds are currently unavailable. If you believe this happened because you forgot your transfer password or there was an error, please contact Omerta.ai Support.",
+                },
+            )
+
+        # 1. Enforce transfer password authorization with 3-attempt failure transfer blocking (without logging out)
         user_rec = await session.scalar(select(User).where(User.id == customer.user_id))
+        effective_transfer_hash = customer.hashed_transfer_password or (user_rec.hashed_password if user_rec else "")
+
         if body.password is not None:
-            if not user_rec or not verify_password(body.password, user_rec.hashed_password):
-                FAILED_TRANSFER_ATTEMPTS[customer.user_id] += 1
-                failed_count = FAILED_TRANSFER_ATTEMPTS[customer.user_id]
+            if not effective_transfer_hash or not verify_password(body.password, effective_transfer_hash):
+                customer.transfer_failed_attempts = (customer.transfer_failed_attempts or 0) + 1
+                failed_count = customer.transfer_failed_attempts
 
                 if failed_count >= 3:
-                    # Inactivate user account and suspend customer profile
-                    if user_rec:
-                        user_rec.is_active = False
-                    customer.status = "SUSPENDED"
-                    customer.risk_level = "CRITICAL"
-
-                    # Revoke and invalidate all active sessions immediately
-                    active_sessions = (
-                        await session.scalars(
-                            select(UserSession).where(UserSession.user_id == customer.user_id, UserSession.is_active == True)
-                        )
-                    ).all()
-                    for sess in active_sessions:
-                        sess.is_active = False
-                        sess.ended_at = datetime.now(UTC)
-                        sess.revoked_at = datetime.now(UTC)
+                    # Block transfer operations only - keep user active and keep session logged in!
+                    customer.transfer_status = "BLOCKED"
+                    customer.transfer_blocked_at = datetime.now(UTC)
 
                     # Create Audit Event
                     session.add(
                         AuditEvent(
-                            event_id=f"EVT-PWD-{secrets.token_hex(4).upper()}",
-                            event_type="EXCESSIVE_PASSWORD_FAILURES",
+                            event_id=f"EVT-TXBLOCK-{secrets.token_hex(4).upper()}",
+                            event_type="TRANSFER_SERVICES_BLOCKED",
                             actor_type="CUSTOMER",
                             actor_id=str(customer.user_id),
-                            source="CustomerTransferAuth",
+                            source="CustomerTransferSecurity",
                             metadata_={
                                 "failed_attempts": failed_count,
                                 "customer_id": customer.external_id,
                                 "customer_name": customer.name,
                                 "omerta_user_number": customer.omerta_user_number,
-                                "risk_level": "CRITICAL",
-                                "status": "INACTIVE_SUSPENDED",
+                                "transfer_status": "BLOCKED",
                                 "client_ip": client_ip,
-                                "description": "3 consecutive incorrect password attempts. Account inactivated & suspended.",
+                                "description": "3 consecutive incorrect transfer password attempts. Transfer services blocked while normal account access is maintained.",
                             },
                         )
+                    )
+
+                    # Automatically create or link TRANSFER_PASSWORD_LOCK ticket via TicketService
+                    tkt_svc = TicketService(session)
+                    auto_ticket = await tkt_svc.create_auto_security_ticket(
+                        customer_id=customer.id,
+                        reason="3_CONSECUTIVE_TRANSFER_PASSWORD_FAILURES",
+                        client_ip=client_ip or "127.0.0.1",
                     )
                     await session.commit()
 
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail={
-                            "error": "ACCOUNT_INACTIVATED_LOCKOUT",
+                            "error": "TRANSFER_BLOCKED_SECURITY_HOLD",
+                            "transfer_status": "BLOCKED",
                             "failed_attempts": failed_count,
                             "remaining_attempts": 0,
-                            "message": "Security Alert: 3 consecutive incorrect password attempts detected. Your account has been INACTIVATED and you have been logged out. An Administrator must review and reactivate your account in the Admin Control Center to restore access.",
+                            "ticket_number": auto_ticket.external_id,
+                            "message": "Your transfer services have been temporarily blocked after multiple unsuccessful transfer-password attempts. Your account remains accessible, but sending and receiving funds are currently unavailable. A security support ticket has been opened.",
                         },
                     )
                 else:
                     remaining = 3 - failed_count
+                    await session.commit()
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
                         detail={
-                            "error": "INVALID_PASSWORD",
+                            "error": "INVALID_TRANSFER_PASSWORD",
                             "failed_attempts": failed_count,
                             "remaining_attempts": remaining,
-                            "message": f"Incorrect account password. (Attempt {failed_count} of 3). Warning: You have {remaining} attempt(s) remaining before your account is INACTIVATED and locked.",
+                            "message": f"Incorrect transfer password. (Attempt {failed_count} of 3). Warning: You have {remaining} attempt(s) remaining before your transfer services are temporarily blocked.",
                         },
                     )
 
             # Reset failed attempts counter on successful verification
-            FAILED_TRANSFER_ATTEMPTS[customer.user_id] = 0
+            customer.transfer_failed_attempts = 0
+            await session.commit()
 
         # 2. Evaluate Real VPN / Proxy Telemetry & Block Anonymized Transfers
         user_sess = await session.scalar(
@@ -469,4 +482,95 @@ async def customer_security_heartbeat(
             ip_timezone=payload.get("ip_timezone"),
         )
         return result
+
+
+class ChangeTransferPasswordRequest(BaseModel):
+    new_transfer_password: str = Field(..., min_length=8, description="New transfer password")
+    confirm_new_transfer_password: str | None = Field(default=None)
+    confirm_transfer_password: str | None = Field(default=None)
+    current_transfer_password: str | None = Field(default=None, description="Current transfer password (optional if in recovery flow)")
+
+    @property
+    def confirmation_password(self) -> str:
+        return self.confirm_new_transfer_password or self.confirm_transfer_password or ""
+
+
+@router.post("/transfer-password/change")
+async def change_transfer_password(
+    body: ChangeTransferPasswordRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Change or set a new transfer password (supports standard update or post-recovery workflow)."""
+    confirm_pwd = body.confirmation_password
+    if not confirm_pwd or body.new_transfer_password != confirm_pwd:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "TRANSFER_PASSWORD_MISMATCH", "message": "New transfer password and confirmation do not match."},
+        )
+
+    async with AsyncSession(get_engine(), expire_on_commit=False) as session:
+        cust_service = CustomerService(session)
+        customer = await cust_service.get_customer_by_user_id(current_user["sub"])
+        if not customer or not customer.user_id:
+            raise HTTPException(status_code=404, detail="Customer not found.")
+
+        user_rec = await session.scalar(select(User).where(User.id == customer.user_id))
+        if not user_rec:
+            raise HTTPException(status_code=404, detail="User not found.")
+
+        # Ensure new transfer password does not match account login password
+        if verify_password(body.new_transfer_password, user_rec.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": "TRANSFER_PASSWORD_CANNOT_MATCH_ACCOUNT_PASSWORD",
+                    "message": "For your financial security, your Transfer Password must be completely different from your Account Login Password.",
+                },
+            )
+
+        # If not in recovery mode, verify current transfer password
+        if not customer.require_transfer_password_change:
+            if not body.current_transfer_password:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={"error": "CURRENT_PASSWORD_REQUIRED", "message": "Please enter your current transfer password."},
+                )
+            effective_old_hash = customer.hashed_transfer_password or user_rec.hashed_password
+            if not verify_password(body.current_transfer_password, effective_old_hash):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail={"error": "INVALID_CURRENT_PASSWORD", "message": "Incorrect current transfer password."},
+                )
+
+        # Update transfer password
+        customer.hashed_transfer_password = hash_password(body.new_transfer_password)
+        customer.require_transfer_password_change = False
+        customer.transfer_failed_attempts = 0
+        customer.transfer_status = "ACTIVE"
+        customer.transfer_unblocked_at = datetime.now(UTC)
+
+        session.add(
+            AuditEvent(
+                event_id=f"EVT-TXPWD-{secrets.token_hex(4).upper()}",
+                event_type="TRANSFER_PASSWORD_CHANGED",
+                actor_type="CUSTOMER",
+                actor_id=str(customer.user_id),
+                source="CustomerTransferSecurity",
+                metadata_={
+                    "customer_id": customer.external_id,
+                    "omerta_user_number": customer.omerta_user_number,
+                    "recovery_mode": bool(customer.require_transfer_password_change),
+                    "description": "Customer successfully updated their financial transfer password.",
+                },
+            )
+        )
+        await session.commit()
+
+        return {
+            "success": True,
+            "message": "Your transfer password has been successfully updated. Transfer services are now active.",
+            "transfer_status": "ACTIVE",
+            "require_transfer_password_change": False,
+        }
+
 

@@ -23,3 +23,14 @@ async def get_network_graph(
             entity_type=entity_type,
             max_nodes=max_nodes,
         )
+
+
+@router.get("/search-suggestions")
+async def get_search_suggestions(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(default=8, ge=1, le=20),
+) -> list[dict[str, Any]]:
+    """Live search auto-complete across customers, accounts, devices, and IPs."""
+    async with AsyncSession(get_engine(), expire_on_commit=False) as session:
+        return await NetworkGraphService(session).get_search_suggestions(query=q, limit=limit)
+

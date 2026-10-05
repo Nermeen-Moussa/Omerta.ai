@@ -511,6 +511,24 @@ class TransferService:
             )
             self.session.add(alert)
 
+            try:
+                from domain.services.ticket_service import TicketService
+                tkt_svc = TicketService(self.session)
+                sig_names = ", ".join(s["name"] for s in signals) if signals else "Elevated risk score"
+                await tkt_svc.create_ticket(
+                    customer=sender_customer,
+                    title=f"Risk Review: Automated Alert for Transfer {transfer_ref}",
+                    description=f"Transaction {transfer_ref} triggered automated risk score {final_risk:.2f}% ({risk_lvl}). Signals: {sig_names}.",
+                    ticket_type="RISK_REVIEW",
+                    priority_override="HIGH" if final_risk < Decimal("75.00") else "CRITICAL",
+                    related_transaction_id=transfer.id,
+                    related_account_id=sender_account.id,
+                    related_risk_assessment_id=risk_assessment.external_id,
+                    opened_by="SYSTEM",
+                )
+            except Exception:
+                pass
+
         # 12. Record Audit Event
         audit_event = AuditEvent(
             event_id=f"EVT-{secrets.token_hex(6).upper()}",

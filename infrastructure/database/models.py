@@ -80,6 +80,12 @@ class User(TimestampMixin, Base):
         back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
     sessions: Mapped[list["Session"]] = relationship(back_populates="user")
+    assigned_tickets: Mapped[list["SupportTicket"]] = relationship(
+        back_populates="assigned_user", foreign_keys="SupportTicket.assigned_user_id"
+    )
+    reviewed_identities: Mapped[list["IdentityVerification"]] = relationship(
+        back_populates="reviewed_by_user", foreign_keys="IdentityVerification.reviewed_by_user_id"
+    )
 
 
 class Customer(TimestampMixin, Base):
@@ -111,6 +117,20 @@ class Customer(TimestampMixin, Base):
     risk_level: Mapped[str] = mapped_column(String(16), default="LOW", index=True)
     registration_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
+    # Transfer Security & Password Separation
+    hashed_transfer_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # ACTIVE | BLOCKED
+    transfer_status: Mapped[str] = mapped_column(String(32), default="ACTIVE", index=True)
+    transfer_failed_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    transfer_blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    transfer_unblocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    require_transfer_password_change: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # National ID & Identity Verification
+    national_id_number: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # NOT_VERIFIED | PENDING_REVIEW | VERIFIED | REJECTED
+    identity_status: Mapped[str] = mapped_column(String(32), default="NOT_VERIFIED", index=True)
+
     user: Mapped["User | None"] = relationship(back_populates="customer")
     accounts: Mapped[list["Account"]] = relationship(
         back_populates="customer", cascade="all, delete-orphan"
@@ -121,6 +141,15 @@ class Customer(TimestampMixin, Base):
     )
     transfers_received: Mapped[list["Transfer"]] = relationship(
         foreign_keys="Transfer.recipient_customer_id", back_populates="recipient_customer"
+    )
+    support_tickets: Mapped[list["SupportTicket"]] = relationship(
+        back_populates="customer", cascade="all, delete-orphan"
+    )
+    identity_verifications: Mapped[list["IdentityVerification"]] = relationship(
+        back_populates="customer", cascade="all, delete-orphan"
+    )
+    transfer_restorations: Mapped[list["TransferRestoration"]] = relationship(
+        back_populates="customer", cascade="all, delete-orphan"
     )
 
 
@@ -157,6 +186,9 @@ class Account(Base):
     sessions: Mapped[list["Session"]] = relationship(back_populates="account")
     ledger_entries: Mapped[list["AccountLedgerEntry"]] = relationship(
         back_populates="account", cascade="all, delete-orphan", order_by="AccountLedgerEntry.id.desc()"
+    )
+    support_tickets: Mapped[list["SupportTicket"]] = relationship(
+        back_populates="account", foreign_keys="SupportTicket.account_id"
     )
 
     def __repr__(self) -> str:
@@ -608,7 +640,186 @@ class KnowledgeChunk(TimestampMixin, Base):
     __table_args__ = (UniqueConstraint("document_id", "section", name="uq_knowledge_doc_section"),)
 
 
+class SupportTicket(TimestampMixin, Base):
+    """Customer support & security resolution ticket."""
+
+    __tablename__ = "support_tickets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    external_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), index=True
+    )
+    account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    # Extended Ticket Fields (Master Specification)
+    ticket_type: Mapped[str] = mapped_column(String(64), default="TRANSFER_PASSWORD_LOCK", index=True)
+    category: Mapped[str | None] = mapped_column(String(64), default="SECURITY", nullable=True)
+    # LOW | MEDIUM | HIGH | CRITICAL
+    priority: Mapped[str] = mapped_column(String(16), default="MEDIUM", index=True)
+    # OPEN | IN_REVIEW | WAITING_FOR_CUSTOMER | WAITING_FOR_DOCUMENT | ESCALATED | RESOLVED | REJECTED | CLOSED
+    status: Mapped[str] = mapped_column(String(32), default="OPEN", index=True)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    customer_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    opened_by: Mapped[str] = mapped_column(String(64), default="CUSTOMER")
+    assigned_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    assigned_analyst_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolution_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    admin_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requires_identity_verification: Mapped[bool] = mapped_column(Boolean, default=False)
+    # NOT_REQUIRED | PENDING | SUBMITTED | UNDER_REVIEW | VERIFIED | REJECTED | EXPIRED
+    identity_verification_status: Mapped[str] = mapped_column(String(32), default="NOT_REQUIRED", index=True)
+    requires_compliance_review: Mapped[bool] = mapped_column(Boolean, default=False)
+    escalated_to_compliance: Mapped[bool] = mapped_column(Boolean, default=False)
+    related_transaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("transfers.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    related_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    related_risk_assessment_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    restoration_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    restoration_approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    restoration_approved_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    restoration_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    customer_restoration_count_at_creation: Mapped[int] = mapped_column(Integer, default=0)
+    context_data: Mapped[dict | None] = mapped_column(JSONB, default=None)
+
+    customer: Mapped["Customer"] = relationship(back_populates="support_tickets")
+    account: Mapped["Account | None"] = relationship(back_populates="support_tickets", foreign_keys=[account_id])
+    assigned_user: Mapped["User | None"] = relationship(
+        foreign_keys=[assigned_user_id]
+    )
+    assigned_analyst: Mapped["User | None"] = relationship(
+        foreign_keys=[assigned_analyst_id]
+    )
+    messages: Mapped[list["SupportMessage"]] = relationship(
+        back_populates="ticket", cascade="all, delete-orphan", order_by="SupportMessage.id.asc()"
+    )
+    identity_verifications: Mapped[list["IdentityVerification"]] = relationship(
+        back_populates="ticket", cascade="all, delete-orphan"
+    )
+    transfer_restorations: Mapped[list["TransferRestoration"]] = relationship(
+        back_populates="ticket", cascade="all, delete-orphan"
+    )
+
+    def __init__(self, **kwargs):
+        if "issue_type" in kwargs and "ticket_type" not in kwargs:
+            kwargs["ticket_type"] = kwargs.pop("issue_type")
+        super().__init__(**kwargs)
+
+    @property
+    def issue_type(self) -> str:
+        return self.ticket_type
+
+    @issue_type.setter
+    def issue_type(self, value: str) -> None:
+        self.ticket_type = value
+
+
+class TransferRestoration(Base):
+    """Immutable audit record of customer transfer privilege restorations."""
+
+    __tablename__ = "transfer_restorations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    external_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), index=True
+    )
+    ticket_id: Mapped[int | None] = mapped_column(
+        ForeignKey("support_tickets.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    actor_id: Mapped[str] = mapped_column(String(64), index=True)
+    actor_name: Mapped[str] = mapped_column(String(255))
+    actor_role: Mapped[str] = mapped_column(String(64), index=True)
+    restoration_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_state: Mapped[str] = mapped_column(String(32), default="BLOCKED")
+    new_state: Mapped[str] = mapped_column(String(32), default="ACTIVE")
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    verification_reference: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    customer: Mapped["Customer"] = relationship(back_populates="transfer_restorations")
+    ticket: Mapped["SupportTicket | None"] = relationship(back_populates="transfer_restorations")
+
+
+class SupportMessage(Base):
+    """WhatsApp-style conversation message within a support ticket."""
+
+    __tablename__ = "support_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    external_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    ticket_id: Mapped[int] = mapped_column(
+        ForeignKey("support_tickets.id", ondelete="CASCADE"), index=True
+    )
+    sender_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    # CUSTOMER | ADMINISTRATOR | FRAUD_ANALYST | AUDITOR | SYSTEM
+    sender_role: Mapped[str] = mapped_column(String(32), default="CUSTOMER", index=True)
+    sender_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    message_text: Mapped[str] = mapped_column(Text, nullable=False)
+    attachment_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attachment_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # NONE | IMAGE | PDF | DOCUMENT
+    attachment_type: Mapped[str] = mapped_column(String(32), default="NONE")
+    is_read_by_recipient: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    ticket: Mapped["SupportTicket"] = relationship(back_populates="messages")
+    sender_user: Mapped["User | None"] = relationship()
+
+
+class IdentityVerification(TimestampMixin, Base):
+    """Customer National ID and document verification record for human review."""
+
+    __tablename__ = "identity_verifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    external_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), index=True
+    )
+    ticket_id: Mapped[int | None] = mapped_column(
+        ForeignKey("support_tickets.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    national_id_number: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+    # NATIONAL_ID | PASSPORT | DRIVERS_LICENSE
+    document_type: Mapped[str] = mapped_column(String(32), default="NATIONAL_ID", index=True)
+    document_front_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    document_back_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # PENDING_REVIEW | VERIFIED | REJECTED
+    verification_status: Mapped[str] = mapped_column(String(32), default="PENDING_REVIEW", index=True)
+    reviewed_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    reviewer_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    customer: Mapped["Customer"] = relationship(back_populates="identity_verifications")
+    ticket: Mapped["SupportTicket | None"] = relationship(back_populates="identity_verifications")
+    reviewed_by_user: Mapped["User | None"] = relationship(
+        back_populates="reviewed_identities", foreign_keys=[reviewed_by_user_id]
+    )
+
+
 async def init_db(engine: AsyncEngine) -> None:
     """Create all database tables asynchronously if they don't already exist."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+

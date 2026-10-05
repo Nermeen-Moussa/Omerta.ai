@@ -60,6 +60,7 @@ async def list_audit_logs(
                 "id": ev.id,
                 "event_id": ev.event_id,
                 "event_type": ev.event_type,
+                "action": ev.event_type,
                 "actor_type": ev.actor_type,
                 "actor_id": ev.actor_id or "SYSTEM",
                 "source": ev.source,
