@@ -1,0 +1,5 @@
+# Line-ending policy: the LightGBM model artifact is a line-oriented text
+# format whose parser aborts on CRLF; never let git convert it.
+models/** -text
+# Keep shell scripts LF (POSIX tools).
+*.sh text eol=lf

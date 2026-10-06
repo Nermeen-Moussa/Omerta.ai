@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Omerta.ai — Investigation Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Omerta<span>.ai</span></div>
+    <nav>
+      <a href="/" id="nav-dashboard">Dashboard</a>
+    </nav>
+    <div class="safety-note">Investigation support only — the human analyst is the final decision maker.</div>
+  </header>
+
+  <main>
+    <!-- ================= Dashboard ================= -->
+    <section id="view-dashboard" class="view">
+      <h1>Cases &amp; Investigations</h1>
+      <div class="cards" id="summary-cards">
+        <div class="card"><div class="card-value" id="stat-total">…</div><div class="card-label">Cases</div></div>
+        <div class="card"><div class="card-value" id="stat-review">…</div><div class="card-label">In review</div></div>
+        <div class="card"><div class="card-value" id="stat-high">…</div><div class="card-label">High severity</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Investigations</h2>
+          <div class="filters">
+            <select id="filter-status">
+              <option value="">All statuses</option>
+              <option value="REVIEW">REVIEW</option>
+              <option value="OPEN">OPEN</option>
+              <option value="CLOSED">CLOSED</option>
+            </select>
+            <select id="filter-severity">
+              <option value="">All severities</option>
+              <option value="HIGH">HIGH</option>
+              <option value="MEDIUM">MEDIUM</option>
+              <option value="LOW">LOW</option>
+            </select>
+            <input id="filter-transaction" placeholder="Transaction id…" />
+            <button id="btn-refresh">Refresh</button>
+          </div>
+        </div>
+        <div id="risk-distribution" class="dist"></div>
+        <table class="table" id="cases-table">
+          <thead>
+            <tr><th>Case</th><th>Transaction</th><th>Status</th><th>Severity</th><th>Evidence</th><th>Audit</th><th>Created</th></tr>
+          </thead>
+          <tbody id="cases-body"></tbody>
+        </table>
+        <div class="msg" id="dashboard-message"></div>
+        <div class="pager">
+          <button id="btn-prev">← Prev</button>
+          <span id="page-info"></span>
+          <button id="btn-next">Next →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Investigation ================= -->
+    <section id="view-investigation" class="view hidden">
+      <button id="btn-back">← Back to dashboard</button>
+      <h1 id="inv-title">Investigation</h1>
+      <div class="msg" id="investigation-message"></div>
+
+      <div class="grid-2">
+        <div class="panel">
+          <h2>Report</h2>
+          <div id="report-summary" class="summary"></div>
+          <dl class="kv" id="report-meta"></dl>
+          <div class="review-box" id="review-box"></div>
+        </div>
+        <div class="panel">
+          <h2>Findings → Evidence traceability</h2>
+          <div id="findings-list"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Evidence <span class="hint" id="evidence-count"></span></h2>
+        <div class="filters" id="evidence-filters">
+          <select id="evidence-tier">
+            <option value="">All tiers</option>
+            <option value="FACT">FACT</option>
+            <option value="STRUCTURAL_SIGNAL">STRUCTURAL_SIGNAL</option>
+            <option value="MODEL_OUTPUT">MODEL_OUTPUT</option>
+            <option value="AGENT_FINDING">AGENT_FINDING</option>
+            <option value="KNOWLEDGE">KNOWLEDGE</option>
+          </select>
+        </div>
+        <table class="table">
+          <thead><tr><th>ID</th><th>Tier</th><th>Category</th><th>Source</th><th>Producer</th><th>Description</th></tr></thead>
+          <tbody id="evidence-body"></tbody>
+        </table>
+        <div class="msg" id="evidence-message"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Graph — structural signals (not a fraud determination)</h2>
+        <div id="graph-view" class="graph"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Audit trail</h2>
+        <ol id="audit-list" class="audit"></ol>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    Omerta.ai — agentic financial-crime investigation support. No autonomous
+    enforcement: the platform recommends, humans decide.
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
