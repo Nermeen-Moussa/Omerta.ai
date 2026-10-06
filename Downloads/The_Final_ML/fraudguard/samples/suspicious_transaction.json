@@ -1,0 +1,21 @@
+{
+  "amount": 9500.0,
+  "amount_to_avg_ratio": 35.0,
+  "amount_to_max_ratio": 4.0,
+  "amount_zscore": 12.0,
+  "is_new_device": 1,
+  "is_new_country": 1,
+  "txn_count_5min": 3,
+  "txn_count_1hour": 9,
+  "is_unusual_hour": 1,
+  "device_customer_count": 6,
+  "chargeback_rate": 0.15,
+  "refund_rate": 0.1,
+  "is_flagged": 1,
+  "merchant_age_days": 3,
+  "min_since_password_change": 10,
+  "min_since_beneficiary_added": 15,
+  "min_since_device_registered": 12,
+  "is_vpn": 1,
+  "hist_count": 20
+}

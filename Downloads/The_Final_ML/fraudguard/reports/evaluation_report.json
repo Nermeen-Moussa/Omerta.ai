@@ -1,0 +1,98 @@
+{
+  "weights": {
+    "rule": 0.3,
+    "ml": 0.45,
+    "anomaly": 0.25
+  },
+  "results": [
+    {
+      "component": "Rule Engine",
+      "threshold": 60,
+      "precision": 0.9268,
+      "recall": 0.2184,
+      "f1": 0.3535,
+      "pr_auc": 0.5197,
+      "roc_auc": 0.9703,
+      "false_positive_rate": 0.0001,
+      "false_negative_rate": 0.7816,
+      "confusion_matrix": {
+        "TN": 20052,
+        "FP": 3,
+        "FN": 136,
+        "TP": 38
+      }
+    },
+    {
+      "component": "XGBoost (ML)",
+      "threshold": 60,
+      "precision": 0.722,
+      "recall": 1.0,
+      "f1": 0.8386,
+      "pr_auc": 0.8488,
+      "roc_auc": 0.9992,
+      "false_positive_rate": 0.0033,
+      "false_negative_rate": 0.0,
+      "confusion_matrix": {
+        "TN": 19988,
+        "FP": 67,
+        "FN": 0,
+        "TP": 174
+      }
+    },
+    {
+      "component": "Isolation Forest",
+      "threshold": 60,
+      "precision": 0.159,
+      "recall": 0.977,
+      "f1": 0.2735,
+      "pr_auc": 0.4123,
+      "roc_auc": 0.9903,
+      "false_positive_rate": 0.0448,
+      "false_negative_rate": 0.023,
+      "confusion_matrix": {
+        "TN": 19156,
+        "FP": 899,
+        "FN": 4,
+        "TP": 170
+      }
+    },
+    {
+      "component": "Final Risk Score",
+      "threshold": 60,
+      "precision": 0.8131,
+      "recall": 1.0,
+      "f1": 0.8969,
+      "pr_auc": 0.9736,
+      "roc_auc": 0.9998,
+      "false_positive_rate": 0.002,
+      "false_negative_rate": 0.0,
+      "confusion_matrix": {
+        "TN": 20015,
+        "FP": 40,
+        "FN": 0,
+        "TP": 174
+      }
+    }
+  ],
+  "feature_importance": {
+    "is_vpn": 0.4888,
+    "is_new_device": 0.2889,
+    "txn_count_5min": 0.0952,
+    "amount_to_avg_ratio": 0.0388,
+    "amount_zscore": 0.0245,
+    "device_customer_count": 0.0218,
+    "hist_count": 0.0153,
+    "amount_to_max_ratio": 0.0081,
+    "chargeback_rate": 0.0065,
+    "is_new_country": 0.0054,
+    "txn_count_1hour": 0.0044,
+    "amount": 0.0014,
+    "is_unusual_hour": 0.0004,
+    "refund_rate": 0.0004,
+    "merchant_age_days": 0.0001,
+    "is_flagged": 0.0,
+    "min_since_password_change": 0.0,
+    "min_since_beneficiary_added": 0.0,
+    "min_since_device_registered": 0.0
+  }
+}

@@ -1,0 +1,23 @@
+# Run from this folder:  docker compose up --build api
+services:
+  api:                       # HTTP service: POST /predict  -> ANOMALY / NORMAL
+    build: .
+    ports:
+      - "8100:8000"          # 8100 on the host, so it does not clash with the Omerta API on 8000
+    volumes:
+      - ./models:/app/models:ro
+
+  predict:                   # one-off CLI prediction on the sample file
+    build: .
+    volumes:
+      - ./models:/app/models:ro
+      - ./samples:/app/samples:ro
+    command: ["python", "predict.py", "--input", "/app/samples/sample_transactions.json", "--models", "/app/models"]
+
+  train:                     # retrain; needs the 7 CSVs in ./data
+    build: .
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./reports:/app/reports
+    command: ["python", "train_models.py", "--data", "/app/data", "--models", "/app/models", "--reports", "/app/reports"]

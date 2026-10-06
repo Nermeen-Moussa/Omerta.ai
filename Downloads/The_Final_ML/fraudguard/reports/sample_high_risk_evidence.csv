@@ -1,0 +1,11 @@
+transaction_id,is_fraud,final_score,rule_reasons
+T000080747,1,100.0,+30 Amount is 20x+ the customer's historical average; +18 Transaction from a device never seen for this customer; +15 Merchant is already flagged as high-risk; +15 Extreme statistical deviation from customer's spending pattern; +12 Merchant account was created less than 7 days ago; +10 Merchant has an abnormally high chargeback rate; +8 Transaction occurred outside the customer's usual active hours
+T000080350,1,81.4,+20 Abnormal transaction velocity (8+ transactions in the last hour); +12 Multiple transactions within a 5-minute window; +6 Transaction originated through a VPN/proxy
+T000080354,1,81.4,+20 Abnormal transaction velocity (8+ transactions in the last hour); +12 Multiple transactions within a 5-minute window; +6 Transaction originated through a VPN/proxy
+T000080353,1,81.4,+20 Abnormal transaction velocity (8+ transactions in the last hour); +12 Multiple transactions within a 5-minute window; +6 Transaction originated through a VPN/proxy
+T000080351,1,81.4,+20 Abnormal transaction velocity (8+ transactions in the last hour); +12 Multiple transactions within a 5-minute window; +6 Transaction originated through a VPN/proxy
+T000080352,1,81.4,+20 Abnormal transaction velocity (8+ transactions in the last hour); +12 Multiple transactions within a 5-minute window; +6 Transaction originated through a VPN/proxy
+T000080356,1,81.4,+20 Abnormal transaction velocity (8+ transactions in the last hour); +12 Multiple transactions within a 5-minute window; +6 Transaction originated through a VPN/proxy
+T000080546,1,81.4,+20 Abnormal transaction velocity (8+ transactions in the last hour); +12 Multiple transactions within a 5-minute window; +6 Transaction originated through a VPN/proxy
+T000080543,1,81.4,+20 Abnormal transaction velocity (8+ transactions in the last hour); +12 Multiple transactions within a 5-minute window; +6 Transaction originated through a VPN/proxy
+T000080549,1,81.4,+20 Abnormal transaction velocity (8+ transactions in the last hour); +12 Multiple transactions within a 5-minute window; +6 Transaction originated through a VPN/proxy
