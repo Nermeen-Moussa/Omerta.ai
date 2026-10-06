@@ -34,6 +34,7 @@ class TransactionCapability:
         except NotFoundError:
             return None
         finally:
+            await session.rollback()
             await session.close()
 
     async def get_account(self, account_id: str) -> dict[str, Any] | None:
@@ -46,6 +47,7 @@ class TransactionCapability:
         except NotFoundError:
             return None
         finally:
+            await session.rollback()
             await session.close()
 
     async def get_account_transactions(self, account_id: str, limit: int) -> dict[str, Any] | None:
@@ -59,6 +61,9 @@ class TransactionCapability:
         except Exception:
             logger.exception("capability failed: get_account_transactions")
             return None
+        finally:
+            await session.rollback()
+            await session.close()
 
     async def get_recipient_history(self, account_id: str, limit: int) -> dict[str, Any] | None:
         from domain.services.transaction_service import TransactionService
@@ -71,6 +76,9 @@ class TransactionCapability:
         except Exception:
             logger.exception("capability failed: get_recipient_history")
             return None
+        finally:
+            await session.rollback()
+            await session.close()
 
     async def get_device_history(self, device_id: str, limit: int) -> dict[str, Any] | None:
         from domain.services.transaction_service import TransactionService
@@ -83,6 +91,9 @@ class TransactionCapability:
         except Exception:
             logger.exception("capability failed: get_device_history")
             return None
+        finally:
+            await session.rollback()
+            await session.close()
 
     async def get_ip_history(self, ip_address: str, limit: int) -> dict[str, Any] | None:
         from domain.services.transaction_service import TransactionService
@@ -93,6 +104,9 @@ class TransactionCapability:
         except Exception:
             logger.exception("capability failed: get_ip_history")
             return None
+        finally:
+            await session.rollback()
+            await session.close()
 
 
 class GraphCapability:
@@ -158,6 +172,7 @@ class KnowledgeCapability:
         try:
             return await getattr(KnowledgeService(session), method)(*args)
         finally:
+            await session.rollback()
             await session.close()
 
     async def _call(self, method: str, *args: Any) -> dict[str, Any] | None:
@@ -183,6 +198,7 @@ class RiskCapability:
         try:
             return await getattr(RiskService(session), method)(*args)
         finally:
+            await session.rollback()
             await session.close()
 
     async def _call(self, method: str, *args: Any) -> dict[str, Any] | None:

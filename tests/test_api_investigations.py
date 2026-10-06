@@ -89,7 +89,8 @@ def test_run_txn001_without_persist_returns_state_only(client: TestClient) -> No
 
 def test_run_txn001_with_persist_persists_case(client: TestClient) -> None:
     response = client.post(
-        "/investigations/run", json={"transaction_id": "TXN-001", "persist": True}
+        "/investigations/run",
+        json={"transaction_id": "TXN-003", "alert_id": "ALT-TXN-003", "persist": True},
     )
     assert response.status_code == 200
     body = response.json()

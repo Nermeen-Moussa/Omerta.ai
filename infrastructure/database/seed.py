@@ -566,7 +566,15 @@ async def seed_all(engine: AsyncEngine, *, reset: bool = False) -> None:
         # 1. Users
         print("Seeding Users...")
         for u_data in USERS:
-            existing = await session.scalar(select(User).where(User.username == u_data["username"]))
+            existing = await session.scalar(
+                select(User).where(
+                    or_(
+                        User.username == u_data["username"],
+                        User.email == u_data["email"],
+                        User.external_id == u_data["external_id"],
+                    )
+                )
+            )
             if not existing:
                 session.add(User(**u_data))
         await session.flush()
