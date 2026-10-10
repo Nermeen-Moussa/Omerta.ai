@@ -138,6 +138,8 @@ export const api = {
     org?: string;
     browser_timezone?: string;
     ip_timezone?: string;
+    step_up_challenge_id?: string;
+    step_up_code?: string;
   }) =>
     apiRequest('/customer/transfers', {
       method: 'POST',

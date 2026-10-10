@@ -19,6 +19,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from domain.services import layer3_engine, layer4_aml, step_up_service
 from domain.services.location_velocity import evaluate_geographic_velocity
 from infrastructure.database.models import (
     Account,
@@ -83,14 +84,36 @@ class TransferConcurrencyManager:
 _GLOBAL_TRANSFER_CONCURRENCY = TransferConcurrencyManager()
 
 
+_AML_RECENT_FLAGS: dict[tuple[str, int], datetime] = {}  # dedupe: (pattern, account) -> last alert time
+
+
+def _layer4_enabled() -> bool:
+    from infrastructure.config import get_settings
+
+    return bool(getattr(get_settings(), "layer4_enabled", False))
+
+
+def _layer3_enabled() -> bool:
+    from infrastructure.config import get_settings
+
+    return (getattr(get_settings(), "risk_engine", "legacy") or "legacy").lower() == "layer3"
+
+
 class TransferError(Exception):
     """Base exception for transfer failures."""
 
-    def __init__(self, message: str, code: str = "TRANSFER_ERROR", status_code: int = 400):
+    def __init__(
+        self,
+        message: str,
+        code: str = "TRANSFER_ERROR",
+        status_code: int = 400,
+        details: dict[str, Any] | None = None,
+    ):
         super().__init__(message)
         self.message = message
         self.code = code
         self.status_code = status_code
+        self.details = details or {}
 
 
 class TransferService:
@@ -194,6 +217,8 @@ class TransferService:
         is_vpn: bool = False,
         city: str | None = None,
         country: str | None = None,
+        step_up_challenge_id: str | None = None,
+        step_up_code: str | None = None,
     ) -> dict[str, Any]:
         """Atomically execute a transfer from sender to recipient with Python Semaphore & Mutex lock synchronization."""
         if amount <= Decimal("0.00"):
@@ -216,6 +241,8 @@ class TransferService:
                 is_vpn=is_vpn,
                 city=city,
                 country=country,
+                step_up_challenge_id=step_up_challenge_id,
+                step_up_code=step_up_code,
             )
 
     async def _execute_transfer_internal(
@@ -233,6 +260,8 @@ class TransferService:
         is_vpn: bool = False,
         city: str | None = None,
         country: str | None = None,
+        step_up_challenge_id: str | None = None,
+        step_up_code: str | None = None,
     ) -> dict[str, Any]:
         # 1. Check idempotency
         existing_transfer = await self.session.scalar(
@@ -325,6 +354,83 @@ class TransferService:
                 code="INSUFFICIENT_FUNDS",
                 status_code=400,
             )
+
+        # 6b. Layer 3 real-time ML scoring (opt-in: RISK_ENGINE=layer3)
+        layer3 = None
+        step_up_passed = False
+        if _layer3_enabled():
+            layer3 = await self._run_layer3(
+                sender_customer=sender_customer,
+                sender_account=sender_account,
+                recipient_customer=recipient_customer,
+                recipient_account=recipient_account,
+                amount=amount,
+                currency=currency,
+                is_vpn=is_vpn,
+                country=country,
+                city=city,
+            )
+            if layer3.action == layer3_engine.BLOCK_ESCALATE:
+                await self._block_and_escalate(
+                    layer3=layer3,
+                    sender_customer=sender_customer,
+                    sender_account=sender_account,
+                    recipient_account=recipient_account,
+                    recipient_customer=recipient_customer,
+                    amount=amount,
+                    currency=currency,
+                    reason="HIGH_RISK_SCORE",
+                )
+            elif layer3.action == layer3_engine.STEP_UP:
+                binding = dict(
+                    customer_id=sender_customer.id,
+                    recipient=recipient_customer.omerta_user_number,
+                    amount=f"{amount:.2f}",
+                    currency=currency,
+                )
+                if step_up_code:
+                    outcome = step_up_service.verify_challenge_detailed(
+                        challenge_id=step_up_challenge_id, code=step_up_code, **binding
+                    )
+                    if outcome == "OK":
+                        step_up_passed = True
+                    elif outcome == "LOCKED":
+                        await self._block_and_escalate(
+                            layer3=layer3,
+                            sender_customer=sender_customer,
+                            sender_account=sender_account,
+                            recipient_account=recipient_account,
+                            recipient_customer=recipient_customer,
+                            amount=amount,
+                            currency=currency,
+                            reason="STEP_UP_FAILED",
+                        )
+                    elif outcome == "WRONG":
+                        raise TransferError(
+                            "Incorrect verification code. Please try again.",
+                            code="STEP_UP_INVALID_CODE",
+                            status_code=428,
+                            details={"challenge_id": step_up_challenge_id, "tier": layer3.tier},
+                        )
+                if not step_up_passed:
+                    # no code supplied, or the challenge expired/unknown: (re)issue one
+                    from infrastructure.config import get_settings
+
+                    challenge = step_up_service.issue_challenge(
+                        **binding,
+                        include_dev_code=bool(getattr(get_settings(), "step_up_dev_echo", False)),
+                    )
+                    raise TransferError(
+                        "Additional verification is required for this transfer.",
+                        code="STEP_UP_REQUIRED",
+                        status_code=428,
+                        details={
+                            **challenge,
+                            "tier": layer3.tier,
+                            "risk_score": layer3.score,
+                            "typology": layer3.typology,
+                        },
+                    )
 
         # 7. Apply ledger updates atomically
         sender_account.balance = Decimal(str(sender_account.balance)) - amount
@@ -473,6 +579,34 @@ class TransferService:
         else:
             risk_lvl = "CRITICAL"
 
+        if layer3 is not None:
+            # Layer 3 result replaces the legacy mock score (ALLOW, or STEP_UP passed).
+            final_risk = Decimal(str(layer3.score))
+            risk_lvl = {"LOW": "LOW", "MEDIUM": "MODERATE"}.get(layer3.tier, "HIGH")
+            requires_review = False
+            signals = [
+                {
+                    "name": f"L3_TYPOLOGY_{layer3.typology}",
+                    "severity": "MEDIUM" if layer3.tier != "LOW" else "LOW",
+                    "description": "; ".join(layer3.typology_reasons) or "No typology signals.",
+                    "source": "LAYER3_ENGINE",
+                },
+                *[
+                    {
+                        "name": "L3_RULE_SIGNAL",
+                        "severity": "MEDIUM",
+                        "description": r["reason"],
+                        "source": "FRAUDGUARD_RULES",
+                    }
+                    for r in layer3.reasons[:8]
+                ],
+            ]
+            txn.txn_metadata = {
+                **(txn.txn_metadata or {}),
+                "layer3": layer3.to_dict(),
+                "step_up_passed": step_up_passed,
+            }
+
         txn.risk_score = final_risk
         txn.risk_level = risk_lvl
         txn.review_status = "REQUIRES_REVIEW" if requires_review else "NOT_REQUIRED"
@@ -550,7 +684,390 @@ class TransferService:
         self.session.add(audit_event)
         await self.session.commit()
 
+        # Layer 4: graph ingest + AML pattern analysis on the CONFIRMED transfer (best-effort,
+        # never allowed to fail or delay-break the customer's transfer).
+        if _layer4_enabled():
+            await self._run_layer4(
+                txn=txn,
+                sender_customer=sender_customer,
+                sender_account=sender_account,
+                recipient_customer=recipient_customer,
+                recipient_account=recipient_account,
+                amount=amount,
+                currency=currency,
+                risk_score=float(final_risk),
+            )
+
         return await self.get_transfer_receipt(transfer_ref)
+
+    async def _run_layer4(
+        self,
+        *,
+        txn: Transaction,
+        sender_customer: Customer,
+        sender_account: Account,
+        recipient_customer: Customer,
+        recipient_account: Account,
+        amount: Decimal,
+        currency: str,
+        risk_score: float,
+    ) -> list[dict[str, Any]]:
+        """Ingest into the graph, look for smurfing / mule patterns, alert + ticket on a hit."""
+        import logging
+        from datetime import timedelta
+
+        from infrastructure.config import get_settings
+
+        log = logging.getLogger(__name__)
+        st = get_settings()
+        now = datetime.now(UTC)
+
+        # 1. Ingest confirmed txn into the relationship graph (Neo4j is a derived projection)
+        if getattr(st, "layer4_neo4j_ingest", True):
+            try:
+                from infrastructure.neo4j.layer4_ingest import ingest_confirmed_transaction
+
+                await ingest_confirmed_transaction(
+                    txn_external_id=txn.external_id,
+                    sender_account_id=sender_account.external_id,
+                    recipient_account_id=recipient_account.external_id,
+                    amount=float(amount),
+                    currency=currency.upper(),
+                    timestamp_iso=now.isoformat(),
+                    risk_score=risk_score,
+                )
+            except Exception as exc:  # Neo4j down is not a reason to fail a transfer
+                log.warning("layer4_neo4j_ingest_skipped: %s", exc)
+
+        try:
+            # 2. Pull the recent confirmed edges around both parties (from PostgreSQL: source of truth)
+            window_h = int(getattr(st, "aml_window_hours", 72))
+            since = now - timedelta(hours=window_h)
+            focus = [sender_account.id, recipient_account.id]
+            cols = (Transaction.external_id, Transaction.account_id, Transaction.recipient_account_id,
+                    Transaction.amount, Transaction.currency, Transaction.timestamp)
+            base = and_(
+                Transaction.status == "COMPLETED",
+                Transaction.recipient_account_id.is_not(None),
+                Transaction.timestamp >= since,
+            )
+            rows = (await self.session.execute(
+                select(*cols).where(and_(base, or_(Transaction.account_id.in_(focus),
+                                                   Transaction.recipient_account_id.in_(focus)))).limit(2000)
+            )).all()
+            neighbours = {r[1] for r in rows} | {r[2] for r in rows}
+            rows += (await self.session.execute(
+                select(*cols).where(and_(base, or_(Transaction.account_id.in_(neighbours),
+                                                   Transaction.recipient_account_id.in_(neighbours)))).limit(4000)
+            )).all()
+            seen, edges = set(), []
+            for r in rows:
+                if r[0] in seen:
+                    continue
+                seen.add(r[0])
+                ts = r[5] if r[5].tzinfo else r[5].replace(tzinfo=UTC)
+                edges.append(layer4_aml.Edge(r[0], r[1], r[2], float(r[3]), r[4], ts))
+
+            # 3. Pattern analysis ("Smurfing pattern? structured sub-threshold txns")
+            thresholds = {**layer4_aml.DEFAULT_THRESHOLDS, "EGP": float(getattr(st, "aml_threshold_egp", 50000.0))}
+            findings = layer4_aml.analyze(edges, focus, now, window_h, thresholds)
+            fresh = []
+            for f in findings:
+                key = (f.pattern, f.subject_account)
+                last = _AML_RECENT_FLAGS.get(key)
+                if last and (now - last) < timedelta(hours=window_h):
+                    continue  # already escalated inside this window
+                _AML_RECENT_FLAGS[key] = now
+                fresh.append(f)
+
+            txn.txn_metadata = {**(txn.txn_metadata or {}), "layer4": {
+                "checked": True, "findings": [f.to_dict() for f in findings]}}
+            if not fresh:
+                await self.session.commit()
+                return []
+
+            # 4. YES -> alert + investigation ticket (escalate to investigation queue)
+            for f in fresh:
+                lvl = {"MEDIUM": "MODERATE"}.get(f.severity, f.severity)
+                self.session.add(Alert(
+                    external_id=f"ALT-{secrets.token_hex(4).upper()}",
+                    transaction_id=txn.id,
+                    alert_type=f"AML_{f.pattern}",
+                    risk_score=Decimal(str(f.score)),
+                    risk_level=lvl,
+                    status="OPEN",
+                ))
+                subject_customer = sender_customer if f.subject_account == sender_account.id else recipient_customer
+                try:
+                    from domain.services.ticket_service import TicketService
+
+                    await TicketService(self.session).create_ticket(
+                        customer=subject_customer,
+                        title=f"AML Review: {f.pattern.replace('_', ' ').title()} ({txn.external_id})",
+                        description=f.summary,
+                        ticket_type="RISK_REVIEW",
+                        priority_override="CRITICAL" if f.severity == "CRITICAL" else "HIGH",
+                        related_transaction_id=txn.id,
+                        opened_by="SYSTEM",
+                    )
+                except Exception as exc:
+                    log.warning("layer4_ticket_failed: %s", exc)
+                self.session.add(AuditEvent(
+                    event_id=f"EVT-{secrets.token_hex(6).upper()}",
+                    event_type="AML_PATTERN_DETECTED",
+                    actor_type="SYSTEM",
+                    actor_id="layer4_aml",
+                    source="TransferService",
+                    transaction_id=txn.external_id,
+                    metadata_=f.to_dict(),
+                ))
+            await self.session.commit()
+            return [f.to_dict() for f in fresh]
+        except Exception:
+            log.exception("layer4_analysis_failed")
+            try:
+                await self.session.rollback()
+            except Exception:
+                pass
+            return []
+
+    async def _run_layer3(
+        self,
+        *,
+        sender_customer: Customer,
+        sender_account: Account,
+        recipient_customer: Customer,
+        recipient_account: Account,
+        amount: Decimal,
+        currency: str,
+        is_vpn: bool,
+        country: str | None,
+        city: str | None,
+    ) -> "layer3_engine.Layer3Decision":
+        """Build the Layer 3 context from the database (best-effort) and score it."""
+        from statistics import pstdev
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(UTC)
+        from infrastructure.config import get_settings as _gs
+
+        ctx = layer3_engine.TransferRiskContext(
+            amount=float(amount), currency=currency.upper(), is_vpn=is_vpn,
+            use_recipient_age_feature=bool(getattr(_gs(), "layer3_use_recipient_age", False)),
+        )
+        try:
+            # Behaviour history of the sending account
+            rows = (
+                await self.session.execute(
+                    select(Transaction.amount, Transaction.timestamp)
+                    .where(and_(Transaction.account_id == sender_account.id, Transaction.status == "COMPLETED"))
+                    .order_by(Transaction.timestamp.desc())
+                    .limit(200)
+                )
+            ).all()
+            amounts = [float(r[0]) for r in rows]
+            ctx.hist_count = len(amounts)
+            if amounts:
+                ctx.hist_avg = sum(amounts) / len(amounts)
+                ctx.hist_max = max(amounts)
+                ctx.hist_std = pstdev(amounts) if len(amounts) > 1 else 0.0
+            ctx.txn_count_5min = sum(1 for r in rows if (now - r[1]).total_seconds() <= 300)
+            ctx.txn_count_1hour = sum(1 for r in rows if (now - r[1]).total_seconds() <= 3600)
+
+            # Beneficiary novelty / recipient profile
+            prior = await self.session.scalar(
+                select(func.count(Transfer.id)).where(
+                    and_(
+                        Transfer.sender_customer_id == sender_customer.id,
+                        Transfer.recipient_customer_id == recipient_customer.id,
+                    )
+                )
+            )
+            ctx.is_new_beneficiary = (prior or 0) == 0
+            created = getattr(recipient_account, "created_at", None)
+            if created:
+                ctx.recipient_account_age_days = max((now - created).total_seconds() / 86400.0, 0.0)
+            ctx.recipient_flagged = (recipient_customer.risk_level or "LOW").upper() in {"HIGH", "CRITICAL"}
+
+            # Previous alerts on this sender's account (first-party / repeat-offender signal)
+            ctx.previous_alert_count = int(
+                await self.session.scalar(
+                    select(func.count(Alert.id))
+                    .join(Transaction, Alert.transaction_id == Transaction.id)
+                    .where(Transaction.account_id == sender_account.id)
+                )
+                or 0
+            )
+
+            # Device / session context
+            cur = await self.session.scalar(
+                select(Session)
+                .options(selectinload(Session.device))
+                .where(and_(Session.customer_id == sender_customer.id, Session.is_active.is_(True)))
+                .order_by(Session.started_at.desc())
+                .limit(1)
+            )
+            if cur and cur.device_id:
+                older = await self.session.scalar(
+                    select(func.count(Session.id)).where(
+                        and_(Session.customer_id == sender_customer.id, Session.started_at < cur.started_at)
+                    )
+                )
+                seen_before = await self.session.scalar(
+                    select(func.count(Session.id)).where(
+                        and_(
+                            Session.customer_id == sender_customer.id,
+                            Session.device_id == cur.device_id,
+                            Session.started_at < cur.started_at,
+                        )
+                    )
+                )
+                ctx.is_new_device = (older or 0) > 0 and (seen_before or 0) == 0
+                ctx.device_customer_count = int(
+                    await self.session.scalar(
+                        select(func.count(func.distinct(Session.customer_id))).where(
+                            Session.device_id == cur.device_id
+                        )
+                    )
+                    or 1
+                )
+                if cur.device and cur.device.first_seen_at:
+                    ctx.min_since_device_registered = max(
+                        (now - cur.device.first_seen_at).total_seconds() / 60.0, 0.0
+                    )
+
+            # Geography + impossible travel (same engine the legacy path uses)
+            declared = (sender_customer.declared_country or "EG").upper()
+            curr_cntry = (country or declared).upper()
+            ctx.is_new_country = curr_cntry != declared
+            prev = await self.session.scalar(
+                select(Session)
+                .options(selectinload(Session.ip_address))
+                .where(and_(Session.customer_id == sender_customer.id, Session.started_at < now))
+                .order_by(Session.started_at.desc())
+                .limit(1)
+            )
+            if prev:
+                velocity = evaluate_geographic_velocity(
+                    prev_country=prev.ip_address.country if prev.ip_address else declared,
+                    prev_city="Cairo",
+                    prev_timestamp=prev.started_at,
+                    current_country=curr_cntry,
+                    current_city=city or ("Cairo" if curr_cntry == "EG" else None),
+                    current_timestamp=now,
+                )
+                ctx.impossible_travel = bool(velocity.is_impossible_travel)
+
+            ctx.is_unusual_hour = now.astimezone(ZoneInfo("Africa/Cairo")).hour < 5
+        except Exception:  # context is best-effort; neutral defaults for anything unavailable
+            import logging
+
+            logging.getLogger(__name__).exception("layer3_context_build_partial")
+        return layer3_engine.assess(ctx)
+
+    async def _block_and_escalate(
+        self,
+        *,
+        layer3: "layer3_engine.Layer3Decision",
+        sender_customer: Customer,
+        sender_account: Account,
+        recipient_account: Account,
+        recipient_customer: Customer,
+        amount: Decimal,
+        currency: str,
+        reason: str,
+    ) -> None:
+        """Do NOT move funds. Record the blocked attempt, open alert + investigation ticket, raise 403."""
+        now = datetime.now(UTC)
+        txn_ref = f"TXN-BLK-{secrets.token_hex(4).upper()}"
+        score = Decimal(str(max(layer3.score, 71.0)))
+        txn = Transaction(
+            external_id=txn_ref,
+            account_id=sender_account.id,
+            recipient_account_id=recipient_account.id,
+            amount=amount,
+            currency=currency.upper(),
+            transaction_type="CUSTOMER_TRANSFER",
+            status="BLOCKED",
+            timestamp=now,
+            risk_score=score,
+            risk_level="CRITICAL" if score >= Decimal("90") else "HIGH",
+            review_status="REQUIRES_REVIEW",
+            txn_metadata={"layer3": layer3.to_dict(), "block_reason": reason},
+        )
+        self.session.add(txn)
+        await self.session.flush()
+
+        assessment = RiskAssessment(
+            external_id=f"RA-{secrets.token_hex(4).upper()}",
+            transaction_id=txn.id,
+            risk_score=score,
+            risk_level=txn.risk_level,
+            requires_human_review=True,
+            correlation_id=f"CORR-{txn_ref}",
+            summary=f"Layer 3 {reason}: score {layer3.score} ({layer3.tier}), typology {layer3.typology}.",
+        )
+        self.session.add(assessment)
+        await self.session.flush()
+        for r in layer3.reasons[:8]:
+            self.session.add(
+                RiskSignal(
+                    assessment_id=assessment.id,
+                    signal_name="L3_RULE_SIGNAL",
+                    severity="HIGH",
+                    description=r["reason"],
+                    source="FRAUDGUARD_RULES",
+                )
+            )
+        self.session.add(
+            Alert(
+                external_id=f"ALT-{secrets.token_hex(4).upper()}",
+                transaction_id=txn.id,
+                alert_type="LAYER3_TRANSFER_BLOCKED",
+                risk_score=score,
+                risk_level=txn.risk_level,
+                status="OPEN",
+            )
+        )
+        try:
+            from domain.services.ticket_service import TicketService
+
+            await TicketService(self.session).create_ticket(
+                customer=sender_customer,
+                title=f"Layer 3 Block: transfer {txn_ref} ({layer3.typology})",
+                description=(
+                    f"Transfer of {amount:,.2f} {currency} to {recipient_customer.omerta_user_number} "
+                    f"was blocked ({reason}). Score {layer3.score}. "
+                    f"Typology signals: {'; '.join(layer3.typology_reasons) or 'none'}."
+                ),
+                ticket_type="RISK_REVIEW",
+                priority_override="CRITICAL" if score >= Decimal("90") else "HIGH",
+                related_account_id=sender_account.id,
+                related_risk_assessment_id=assessment.external_id,
+                opened_by="SYSTEM",
+            )
+        except Exception:
+            pass
+        self.session.add(
+            AuditEvent(
+                event_id=f"EVT-{secrets.token_hex(6).upper()}",
+                event_type="TRANSFER_BLOCKED_LAYER3",
+                actor_type="SYSTEM",
+                actor_id="layer3_engine",
+                source="TransferService",
+                transaction_id=txn_ref,
+                metadata_={"reason": reason, **layer3.to_dict(), "amount": str(amount), "currency": currency},
+            )
+        )
+        await self.session.commit()
+        raise TransferError(
+            "This transfer was blocked by our fraud-protection system and has been sent to our "
+            "security team for review. No funds were moved.",
+            code="TRANSFER_BLOCKED_HIGH_RISK",
+            status_code=403,
+            details={"reference": txn_ref, "risk_score": float(score), "tier": layer3.tier,
+                     "typology": layer3.typology, "reason": reason},
+        )
 
     async def get_transfer_receipt(self, transfer_ref: str) -> dict[str, Any]:
         """Fetch receipt for a completed transfer."""

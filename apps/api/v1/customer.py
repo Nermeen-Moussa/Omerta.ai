@@ -51,6 +51,8 @@ class TransferInitiateRequest(BaseModel):
     browser_timezone: str | None = None
     ip_timezone: str | None = None
     city: str | None = None
+    step_up_challenge_id: str | None = Field(default=None, description="Challenge id from a STEP_UP_REQUIRED response")
+    step_up_code: str | None = Field(default=None, description="One-time verification code for step-up")
 
     @property
     def resolved_sender_account_id(self) -> str:
@@ -350,12 +352,14 @@ async def initiate_transfer(
                 is_vpn=is_vpn_detected,
                 city=body.city,
                 country=effective_country,
+                step_up_challenge_id=body.step_up_challenge_id,
+                step_up_code=body.step_up_code,
             )
             return receipt
         except TransferError as err:
             raise HTTPException(
                 status_code=err.status_code,
-                detail={"error": err.code, "message": err.message},
+                detail={"error": err.code, "message": err.message, **err.details},
             )
 
 

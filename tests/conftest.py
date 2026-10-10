@@ -84,17 +84,26 @@ def _ensure_test_database_exists() -> None:
 
 
 def _migrate_test_database() -> None:
-    """Run `alembic upgrade head` against omerta_test via a subprocess.
+    """TEST-ONLY: build the test schema from the SQLAlchemy models.
 
-    A subprocess keeps Alembic's asyncio.run() out of pytest's event loops.
-    Runs unconditionally (idempotent): schema evolution (e.g. Phase 11
-    evidence/audit columns) must reach an existing omerta_test database too.
+    The Alembic history on main cannot build a fresh database (tables
+    'transfers' and 'account_ledger_entries' are never created by a migration).
+    The app builds its schema with Base.metadata.create_all at startup, so the
+    tests do the same. Refuses to touch any database whose URL lacks 'omerta_test'.
     """
-    subprocess.run(
-        [sys.executable, "-m", "alembic", "-x", f"db_url={TEST_DB_URL}", "upgrade", "head"],
-        check=True,
-        capture_output=True,
-    )
+    from infrastructure.database.models import Base
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    assert "omerta_test" in TEST_DB_URL, "refusing to reset a non-test database"
+
+    async def _build() -> None:
+        engine = create_async_engine(TEST_DB_URL)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.create_all)
+        await engine.dispose()
+
+    asyncio.run(_build())
 
 
 @pytest.fixture(scope="session")

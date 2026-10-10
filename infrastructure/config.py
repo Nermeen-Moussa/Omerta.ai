@@ -50,6 +50,22 @@ class Settings(BaseSettings):
     # --- Risk subsystem ---
     # Only 'mock' exists in Phase 7; the future ML engine will add its own.
     risk_provider: str = "mock"
+    # Transfer-time scoring engine: 'legacy' = inline mock rules (default, keeps old tests
+    # deterministic); 'layer3' = FraudGuard ML + typology + step-up/block policy.
+    risk_engine: str = "legacy"
+    fraudguard_models_dir: str | None = None  # default: <repo>/models/fraudguard
+    # Echo the step-up one-time code in the API response (DEV ONLY - never in production).
+    step_up_dev_echo: bool = False
+    # Feed recipient account age to the model as "merchant_age_days" (off: proxy is poorly calibrated).
+    layer3_use_recipient_age: bool = False
+
+    # --- Layer 4: graph analytics & AML (runs AFTER a transfer is confirmed) ---
+    layer4_enabled: bool = False
+    layer4_neo4j_ingest: bool = True  # also project each confirmed transfer into Neo4j
+    aml_window_hours: int = 72
+    # EGP reporting threshold used by the structuring/fan-in/fan-out rules (DEMO value; set the
+    # real regulatory figure). Lower it (e.g. 1000) to demo smurfing with small transfers.
+    aml_threshold_egp: float = 50000.0
 
     # --- Security (Phase 17) ---
     # API keys: unset => auth disabled (local dev/test default). Set to enable
